@@ -12,7 +12,7 @@ if [[ -e "$PAIR_ROOT" ]]; then
 fi
 mkdir -p "$FIRST_OUT" "$SECOND_OUT"
 
-PAIR_SESSION="repro-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+PAIR_SESSION="repro-$(date -u +%Y%m%dt%H%M%Sz)-$$"
 FIRST_VOLUME="ax3000t-stage4-repro-a-${PAIR_SESSION}"
 SECOND_VOLUME="ax3000t-stage4-repro-b-${PAIR_SESSION}"
 

@@ -70,6 +70,13 @@ class BuilderSnapshotLockTest(unittest.TestCase):
         )
         self.assertIn("find /work -mindepth 1 -maxdepth 1 -print -quit", after_inspect)
 
+    def test_generated_volume_names_stay_inside_lowercase_namespace(self) -> None:
+        pair_runner = (ROOT / "scripts/run_repro_pair.sh").read_text()
+        self.assertIn("date -u +%Y%m%dt%H%M%Sz", self.runner)
+        self.assertIn("date -u +%Y%m%dt%H%M%Sz", pair_runner)
+        self.assertNotIn("date -u +%Y%m%dT%H%M%SZ", self.runner)
+        self.assertNotIn("date -u +%Y%m%dT%H%M%SZ", pair_runner)
+
 
 if __name__ == "__main__":
     unittest.main()

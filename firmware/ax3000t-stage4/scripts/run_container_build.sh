@@ -5,8 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE_TAG="${IMAGE_TAG:-ax3000t-stage4-builder:ubuntu22.04-pinned}"
 OUT_DIR="${OUT_DIR:-$ROOT_DIR/out}"
 JOBS="${JOBS:-2}"
-WORK_VOLUME="${WORK_VOLUME:-ax3000t-stage4-work-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
-WORK_VOLUME_SESSION="${WORK_VOLUME_SESSION:-manual-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+WORK_VOLUME="${WORK_VOLUME:-ax3000t-stage4-work-$(date -u +%Y%m%dt%H%M%Sz)-$$}"
+WORK_VOLUME_SESSION="${WORK_VOLUME_SESSION:-manual-$(date -u +%Y%m%dt%H%M%Sz)-$$}"
 SIGNING_KEY_FILE="${STAGE4_SIGNING_KEY_FILE:-}"
 
 case "$JOBS" in
