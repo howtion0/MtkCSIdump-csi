@@ -28,6 +28,8 @@ enum CsiMetadataFlags : u8
     CSI_META_DATA_NUM_INFERRED = 1U << 1,
     CSI_META_EXTENDED_ABI = 1U << 2,
     CSI_META_TRUNCATED = 1U << 3,
+    CSI_META_FREQ_IS_PRIMARY = 1U << 4,
+    CSI_META_TONE_MASKED_REORDERED = 1U << 5,
 };
 
 enum CsiPresenceFlags : u16
@@ -60,6 +62,7 @@ struct csi_data
     u32 ts = 0;
     u8 data_bw = 0;
     u8 pri_ch_idx = 0;
+    u16 channel_frequency_mhz = 0;
     std::array<u8, ETH_ALEN> ta{};
     u32 ext_info = 0;
     u8 rx_mode = 0;

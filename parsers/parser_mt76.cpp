@@ -42,6 +42,7 @@ std::vector<CsiPacket> ParserMT76::processRawData(void *data)
         packet.channel_bandwidth = raw->ch_bw;
         packet.data_bandwidth = raw->data_bw;
         packet.primary_channel_index = raw->pri_ch_idx;
+        packet.channel_frequency_mhz = raw->channel_frequency_mhz;
         packet.band = raw->band;
         packet.rx_mode = raw->rx_mode;
         packet.tx_index = raw->tx_idx;

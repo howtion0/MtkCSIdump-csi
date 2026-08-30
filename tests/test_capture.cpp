@@ -42,8 +42,11 @@ void test_bandwidth_and_dynamic_chains()
     eighty_mhz.tx_idx = 1;
     eighty_mhz.rssi = -47;
     eighty_mhz.snr = 31;
+    eighty_mhz.channel_frequency_mhz = 5210;
+    eighty_mhz.presence_flags = CSI_PRESENT_CHANNEL_FREQ;
     eighty_mhz.metadata_flags =
-        CSI_META_CH_BW_INFERRED | CSI_META_DATA_NUM_INFERRED;
+        CSI_META_CH_BW_INFERRED | CSI_META_DATA_NUM_INFERRED |
+        CSI_META_TONE_MASKED_REORDERED;
     for (size_t index = 0; index < CSI_BW80_DATA_COUNT; ++index)
     {
         eighty_mhz.data_i[index] = static_cast<int16_t>(index);
@@ -70,6 +73,11 @@ void test_bandwidth_and_dynamic_chains()
     expect(packets[0].samples[255].i == 255 &&
                packets[0].samples[255].q == -255,
            "last valid I/Q pair survives parsing");
+    expect(packets[0].channel_frequency_mhz == 5210 &&
+               (packets[0].presence_flags & CSI_PRESENT_CHANNEL_FREQ),
+           "queried channel frequency and its presence bit survive parsing");
+    expect(packets[0].metadata_flags & CSI_META_TONE_MASKED_REORDERED,
+           "audited driver tone-order state survives parsing");
 }
 
 void test_nested_attribute_indices()

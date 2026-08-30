@@ -55,6 +55,8 @@ order)**. The fixed header is 80 bytes, followed by exactly `data_num` pairs of
 | 1 | `DATA_NUM_INFERRED` | count derived from data BW |
 | 2 | `EXTENDED_ABI` | MediaTek shifted extended ABI decoded |
 | 3 | `TRUNCATED` | source advertised more bins than the ABI carried |
+| 4 | `FREQ_IS_PRIMARY` | `CENTER_FREQ1` was absent; frequency is the nl80211 primary channel |
+| 5 | `TONE_MASKED_REORDERED` | capture enabled the driver's audited type-5 mask+reorder path |
 
 ## Presence bitmap (offset 74)
 

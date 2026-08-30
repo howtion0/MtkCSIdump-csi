@@ -94,6 +94,9 @@ struct DumpContext
 {
     struct unl *netlink;
     std::vector<csi_data *> *output;
+    u16 channel_frequency_mhz;
+    bool frequency_is_primary;
+    bool tone_masked_reordered;
     bool parse_failed = false;
 };
 
@@ -126,6 +129,63 @@ bool attr_u32(struct nlattr *attr, u32 &value)
         return false;
     value = nla_get_u32(attr);
     return true;
+}
+
+int read_interface_frequency(unsigned if_index, u16 &frequency_mhz,
+                             bool &frequency_is_primary)
+{
+    frequency_mhz = 0;
+    frequency_is_primary = false;
+
+    struct unl netlink = {};
+    if (unl_genl_init(&netlink, "nl80211") < 0)
+        return -ENOLINK;
+
+    struct nl_msg *request =
+        unl_genl_msg(&netlink, NL80211_CMD_GET_INTERFACE, false);
+    if (!request)
+    {
+        unl_free(&netlink);
+        return -ENOMEM;
+    }
+    if (nla_put_u32(request, NL80211_ATTR_IFINDEX, if_index))
+    {
+        nlmsg_free(request);
+        unl_free(&netlink);
+        return -EMSGSIZE;
+    }
+
+    struct nl_msg *reply = nullptr;
+    const int ret = unl_genl_request_single(&netlink, request, &reply);
+    if (ret < 0 || !reply)
+    {
+        if (reply)
+            nlmsg_free(reply);
+        unl_free(&netlink);
+        return ret < 0 ? ret : -ENODATA;
+    }
+
+    u32 raw_frequency = 0;
+    struct nlattr *frequency =
+        unl_find_attr(&netlink, reply, NL80211_ATTR_CENTER_FREQ1);
+    if (!attr_u32(frequency, raw_frequency))
+    {
+        frequency = unl_find_attr(&netlink, reply, NL80211_ATTR_WIPHY_FREQ);
+        if (!attr_u32(frequency, raw_frequency))
+        {
+            nlmsg_free(reply);
+            unl_free(&netlink);
+            return -ENODATA;
+        }
+        frequency_is_primary = true;
+    }
+
+    nlmsg_free(reply);
+    unl_free(&netlink);
+    if (raw_frequency == 0 || raw_frequency > UINT16_MAX)
+        return -ERANGE;
+    frequency_mhz = static_cast<u16>(raw_frequency);
+    return 0;
 }
 
 template <size_t N>
@@ -368,6 +428,13 @@ public:
             return NL_SKIP;
         }
 
+        entry->channel_frequency_mhz = context->channel_frequency_mhz;
+        entry->presence_flags |= CSI_PRESENT_CHANNEL_FREQ;
+        if (context->frequency_is_primary)
+            entry->metadata_flags |= CSI_META_FREQ_IS_PRIMARY;
+        if (context->tone_masked_reordered)
+            entry->metadata_flags |= CSI_META_TONE_MASKED_REORDERED;
+
         entry->host_timestamp_ns = static_cast<u64>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::system_clock::now().time_since_epoch())
@@ -390,6 +457,19 @@ public:
         {
             std::fprintf(stderr, "Unknown Wi-Fi interface '%s': %s\n", wifi,
                          std::strerror(errno));
+            return nullptr;
+        }
+
+        u16 channel_frequency_mhz = 0;
+        bool frequency_is_primary = false;
+        const int frequency_ret = read_interface_frequency(
+            if_index, channel_frequency_mhz, frequency_is_primary);
+        if (frequency_ret < 0)
+        {
+            std::fprintf(stderr,
+                         "Cannot read the current channel for '%s': %s\n",
+                         wifi, std::strerror(-frequency_ret));
+            clear_csi_list(csi_list);
             return nullptr;
         }
 
@@ -438,7 +518,9 @@ public:
             }
             nla_nest_end(msg, data);
 
-            DumpContext context{&netlink, &csi_list, false};
+            DumpContext context{&netlink, &csi_list, channel_frequency_mhz,
+                                frequency_is_primary, tone_masked_reordered,
+                                false};
             const int ret = unl_genl_request(&netlink, msg, csi_dump_callback,
                                              &context);
             unl_free(&netlink);
@@ -455,6 +537,22 @@ public:
             }
 
             remaining -= request_count;
+        }
+
+        u16 final_frequency_mhz = 0;
+        bool final_frequency_is_primary = false;
+        const int final_frequency_ret = read_interface_frequency(
+            if_index, final_frequency_mhz, final_frequency_is_primary);
+        if (final_frequency_ret < 0 ||
+            final_frequency_mhz != channel_frequency_mhz ||
+            final_frequency_is_primary != frequency_is_primary)
+        {
+            std::fprintf(stderr,
+                         "Channel changed or became unreadable while dumping CSI; "
+                         "discarding the batch\n");
+            clear_csi_list(csi_list);
+            errno = final_frequency_ret < 0 ? -final_frequency_ret : EAGAIN;
+            return nullptr;
         }
 
         return &csi_list;
@@ -539,7 +637,10 @@ public:
         if (!if_index)
             return errno ? -errno : -ENODEV;
 
+        tone_masked_reordered = false;
         int ret = set_csi(if_index, 2, 3, 0, 34); // QoS data frames.
+        if (!ret)
+            ret = set_csi(if_index, 2, 5, 2, 0); // Mask and reorder tones.
         if (!ret)
             ret = set_csi(if_index, 2, 9, 1, 0); // Firmware event output.
         if (!ret)
@@ -547,6 +648,8 @@ public:
 
         if (ret < 0)
             (void)set_csi(if_index, 0, 0, 0, 0); // Best-effort rollback.
+        else
+            tone_masked_reordered = true;
         return ret;
     }
 
@@ -558,11 +661,15 @@ public:
         const unsigned if_index = if_nametoindex(wifi);
         if (!if_index)
             return errno ? -errno : -ENODEV;
-        return set_csi(if_index, 0, 0, 0, 0);
+        const int ret = set_csi(if_index, 0, 0, 0, 0);
+        if (ret >= 0)
+            tone_masked_reordered = false;
+        return ret;
     }
 
 private:
     std::vector<csi_data *> csi_list;
+    bool tone_masked_reordered = false;
 };
 
 MT76API::MT76API() : d(new MT76APIPrivate()) {}

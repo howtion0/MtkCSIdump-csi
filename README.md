@@ -152,7 +152,13 @@ mode hint, not a separately validated PPDU-type or MCS field.
   driver time is the firmware-provided 32-bit counter. They are not the same
   clock and must be aligned by downstream code.
 - Channel center frequency is reserved in v2 and is zero unless an authoritative
-  source supplies it. `pri_ch_idx` is not an IEEE channel number.
+  source supplies it. The capture executable queries the interface with the
+  read-only `NL80211_CMD_GET_INTERFACE` request for every dump batch, preferring
+  `CENTER_FREQ1` and marking a `WIPHY_FREQ` primary-channel fallback in the
+  quality flags. A before/after mismatch discards that batch. Capture startup
+  also requests the driver's type-5 tone mask+reorder mode and marks successful
+  records, so localization code can refuse unknown carrier ordering.
+  `pri_ch_idx` is not an IEEE channel number.
 - Raw inter-chain phase is not a calibrated AoA. Fixed RF-chain offsets and the
   real antenna geometry must be measured before MUSIC/ESPRIT or learned angle
   models can be trusted.
