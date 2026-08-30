@@ -1,0 +1,77 @@
+{
+  "artifacts": {
+    "mt7915e_vanilla_module": {
+      "bytes": 1644472,
+      "csi_markers": [],
+      "depends": [
+        "cfg80211",
+        "mac80211",
+        "mt76",
+        "mt76-connac-lib"
+      ],
+      "path": "mt7915e-sdk.ko",
+      "sha256": "657e3b9591f6dad9dcd1f476bbb05f9998cb1113f172063066a8f10de9885094",
+      "this_module_section_size": 640,
+      "undefined_symbols_count": 294,
+      "undefined_symbols_sha256": "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb",
+      "vermagic": "6.12.94 SMP mod_unload aarch64"
+    }
+  },
+  "classification": "EXPERIMENTAL-DO-NOT-FLASH",
+  "gates": [
+    {
+      "detail": "module is ELF64 AArch64",
+      "evidence": 183,
+      "name": "module.baseline.architecture",
+      "status": "pass"
+    },
+    {
+      "detail": "module layout matches the Kwrt 0x440-byte ABI, not the 0x280 SDK ABI",
+      "evidence": "0x280",
+      "name": "module.baseline.this_module_size",
+      "status": "fail"
+    },
+    {
+      "detail": "mt7915e vermagic matches the pinned kernel ABI",
+      "evidence": "6.12.94 SMP mod_unload aarch64",
+      "name": "module.baseline.vermagic",
+      "status": "pass"
+    },
+    {
+      "detail": "mt7915e dependency set matches the live/pinned baseline",
+      "evidence": [
+        "cfg80211",
+        "mac80211",
+        "mt76",
+        "mt76-connac-lib"
+      ],
+      "name": "module.baseline.dependencies",
+      "status": "pass"
+    },
+    {
+      "detail": "vanilla control module matches the exact 294-symbol Kwrt ABI baseline",
+      "evidence": {
+        "count": 294,
+        "sha256": "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb"
+      },
+      "name": "module.baseline.undefined_symbols",
+      "status": "pass"
+    },
+    {
+      "detail": "vanilla control module contains no CSI implementation markers",
+      "evidence": [],
+      "name": "module.baseline.no_csi",
+      "status": "pass"
+    },
+    {
+      "detail": "kernel package is not an .ipk (SDK .apk is forbidden)",
+      "evidence": null,
+      "name": "kmod.baseline.read",
+      "status": "fail"
+    }
+  ],
+  "image": "kmod-mt7915e-6.12.94.2026.03.19~39c960c3-r2.apk",
+  "purpose": "vanilla-before-CSI ABI gate",
+  "result": "fail",
+  "schema": 1
+}

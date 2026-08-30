@@ -1,0 +1,30 @@
+# This file is an overlay, not a standalone OpenWrt seed. build_image.sh first
+# concatenates the exact Kwrt aae05968 devices/common/.config and
+# devices/mediatek_filogic/.config, then removes only the multi/all-profile
+# selectors and appends these values.
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_TARGET_MULTI_PROFILE=n
+CONFIG_TARGET_ALL_PROFILES=n
+CONFIG_TARGET_mediatek_filogic_DEVICE_xiaomi_mi-router-ax3000t=y
+CONFIG_PACKAGE_mtkcsi-dump=y
+# Prevent the kernel banner/build identity from inheriting the container UID or
+# its randomly generated hostname. These two values are part of the image lock.
+CONFIG_KERNEL_BUILD_USER="builder"
+CONFIG_KERNEL_BUILD_DOMAIN="buildhost"
+# Keep package verification enabled, but deliberately publish no compatible
+# remote package feed for this one-off custom kernel ABI.  A guaranteed-local,
+# nonexistent file URL cannot silently fall back to Kwrt/OpenWrt repositories.
+CONFIG_SIGNED_PACKAGES=y
+CONFIG_SIGNATURE_CHECK=y
+# Avoid emitting one repository line per upstream feed. This custom kernel ABI
+# intentionally advertises only the single, guaranteed-unavailable core path.
+CONFIG_PER_FEED_REPO=n
+CONFIG_VERSIONOPT=y
+CONFIG_VERSION_DIST="OpenWrt-CSI-Lab"
+CONFIG_VERSION_NUMBER="25.12.5-experimental"
+CONFIG_VERSION_CODE="ax3000t-single-ubi-112m-csi"
+CONFIG_VERSION_REPO="file:///nonexistent/ax3000t-112m-csi-packages"
+CONFIG_VERSION_MANUFACTURER="OpenWrt CSI Lab"
+CONFIG_VERSION_HOME_URL="https://github.com/howtion0/MtkCSIdump-csi"
+CONFIG_VERSION_MANUFACTURER_URL="https://github.com/howtion0/MtkCSIdump-csi"

@@ -1,0 +1,183 @@
+{
+  "schema": 1,
+  "classification": "public-build-inputs-only",
+  "openwrt": {
+    "url": "https://git.openwrt.org/openwrt/openwrt.git",
+    "tag": "v25.12.5",
+    "commit": "f0a60eee2fe051741c643ea6118718aae1ef17fb",
+    "tree": "4ac64a90c5cd190209b4a9428fc34f12e6c87d4b",
+    "revision": "r33051-f5dae5ece4",
+    "kernel_release": "6.12.94",
+    "toolchain": "GCC 14.3.0, musl, aarch64_cortex-a53"
+  },
+  "kwrt_layout_source": {
+    "url": "https://github.com/kiddin9/Kwrt.git",
+    "commit": "aae059682faae01d600db7061c150f65de87a21e",
+    "tree": "57e8b04096016c46667f316f60564f958d77cdbf",
+    "common_diy_sha256": "cd1e5ce9fdc657650a21583c34b3630934dcadc2ad3809a0abbb4abca48fb351",
+    "vermagic_transform": {
+      "source_line": 46,
+      "source_text": "sed -i \"s/^.*vermagic$/\\techo '1' > \\$(LINUX_DIR)\\/.vermagic/\" include/kernel-defaults.mk",
+      "upstream_text": "grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic",
+      "patched_text": "echo '1' > $(LINUX_DIR)/.vermagic"
+    },
+    "common_config_sha256": "d7805dc8260ee3a33a82c43ff443de0ed11f5c97e7513c70aec1e297defe251c",
+    "target_config_sha256": "c9a16d88011cbb1f4ad05f001f7ecfd692023a2eadbf82d804db7c9bda993252"
+  },
+  "build_overlay": {
+    "file": "build-config.seed",
+    "sha256": "ffbad36efd4130b5a4bd983106de51334cd1e940379b72c97351cdb103bf85a5",
+    "kernel_build_user": "builder",
+    "kernel_build_domain": "buildhost"
+  },
+  "builder": {
+    "platform": "linux/amd64",
+    "base_digest": "ubuntu@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982",
+    "source_date_epoch": 1782770622,
+    "apt_snapshot": "20260830T000000Z",
+    "apt_sources_file": "container/apt-sources.list",
+    "apt_sources_sha256": "24d65889f9efec7e8d378aff72ce0b186e6c04fa4abf3d42fd9cb9997309a2f9",
+    "apt_snapshot_uri": "https://snapshot.ubuntu.com/ubuntu/20260830T000000Z",
+    "apt_archive_keyring_file": "/usr/share/keyrings/ubuntu-archive-keyring.gpg",
+    "apt_archive_keyring_sha256": "1a4dd63e5c76728960a2edddae22e2e0fc53df8e8b87806deb971030ac704eb0",
+    "dockerfile": "container/Dockerfile",
+    "dockerfile_sha256": "d92e554945031c4218833042a82030e00390a47fd9492d1aa59243f1c1653f2a",
+    "default_jobs": 2,
+    "maximum_jobs": 6,
+    "minimum_free_space_gib": 25
+  },
+  "signing": {
+    "status": "READY",
+    "private_key_environment": "STAGE4_SIGNING_KEY_FILE",
+    "public_key_file": "keys/ax3000t-stage4.pub",
+    "base_ucert_file": "keys/ax3000t-stage4.ucert",
+    "public_key_sha256": "6a9fe57860aa33bb29ccdd3156d1e63678cfa520d7e301099618fa750f51048e",
+    "base_ucert_sha256": "29b3cd9dc35d0863177e0b6a587521dd6e4ca22fe30962199e95a0f3ebfcfe73",
+    "usign_fingerprint": "2c85dde96446dc6a",
+    "base_ucert_validfrom": 1788126829,
+    "base_ucert_expiresat": 1819662829,
+    "private_key_must_never_be_committed": true
+  },
+  "wifi_generator": {
+    "source_path": "package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc",
+    "rootfs_path": "lib/wifi/mac80211.uc",
+    "sha256": "84ecf265e27e59b1a35fdcef45d06ffd015617678d66173fb1fb80fbfedebfc4",
+    "default_disabled_expression": "set ${si}.disabled='${defaults ? 0 : 1}'",
+    "default_key_expression": "set ${si}.key='${defaults?.key || \"\"}'"
+  },
+  "mt76": {
+    "url": "https://github.com/openwrt/mt76.git",
+    "commit": "39c960c3ada558b4c2e7915772483d3731573d09",
+    "tree": "2f3906e9258313164e99343877abc24075cf131f",
+    "source_date": "2026-03-19",
+    "package_release": 2
+  },
+  "capture": {
+    "url": "https://github.com/howtion0/MtkCSIdump-csi.git",
+    "stage2_behavior_commit": "10adb198bc0a450e8906ac47f8dd4a14ab50c352",
+    "commit": "b8d7b73fc582795e734086a676a0a18a15980cb8",
+    "tree": "9e54f6d5d1ac23ab8bc8ce18f6a40765d4e0417b",
+    "commit_timestamp": 1788126290,
+    "source_archive_format": "openwrt-rawgit-normalized-tar.zst",
+    "source_archive_bytes": 14026970,
+    "source_archive_sha256": "6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18",
+    "source_archive_member_count": 109,
+    "source_archive_members_sha256": "49bab41ec3c541ec353acb9dc6df244d7724bf052e72fc3a56240f63c81d51f6",
+    "canonical_toolchain": {
+      "git": "2.34.1",
+      "gnu_tar": "1.34",
+      "zstd": "1.4.8"
+    },
+    "stage3_validation": {
+      "pytest_passed": 86,
+      "ctest_passed": 2,
+      "ctest_total": 2,
+      "sdist_exact_content_gate": true,
+      "isolated_install_demo_byte_compare": true
+    },
+    "package": "mtkcsi-dump",
+    "package_release": 1,
+    "package_files": {
+      "Makefile": "1e2226f2be68643a55127eb9e5229e32b47e68b13abda7ecb820e78488292f7b",
+      "files/mtkcsi.config": "2d9407740ce1051f0403c423f01a951083d692095a1ee52ff7705b8bf9feabda",
+      "files/mtkcsi-dump.init": "9691048cea2118702a0b2e012950c82acdbfedb662be3caadee493c58ca5f29a"
+    },
+    "default_enabled": false,
+    "udp_protocol": 2
+  },
+  "live_abi_baseline": {
+    "kernel_dependency": "kernel (=6.12.94~1-r1)",
+    "package_format": "ipk",
+    "this_module_section_size": "0x440",
+    "undefined_symbols_count": 294,
+    "undefined_symbols_sha256": "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb",
+    "module_bytes": 218088,
+    "module_sha256": "346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621",
+    "modversions": false
+  },
+  "patched_abi_expectation": {
+    "undefined_symbols_count": 297,
+    "undefined_symbols_sha256": "9682dffc0a1dc4760fb7bb61f6c5d1b8439a7f561e191f9ab5804dd4a9aadc4d",
+    "added_symbols": ["__nla_parse", "nla_put", "skb_trim"],
+    "removed_symbols": [],
+    "modversions": false
+  },
+  "patches": {
+    "10-kwrt-vermagic-one.patch": "43c09063907e10a9dd37a978be08ac5ea55774299162dd53a143963ecc1d57c5",
+    "23-ax3000t.patch": "15bd24057e74b5335fb419fb6fc481393c34a770469c160829371ed4d20a158f",
+    "25-platform.patch": "4a98156b041f653194652e79b770dba18c4d9a840b64cb40b657c4420a412a95",
+    "26-ax3000t-single-ubi-compat.patch": "6e8a02e357d40750e8e7440df1a04f014c0c2b9b4d030cb83cca52d2104ef3b4",
+    "999-mt7915-csi-v2-hardened.patch": "02d129819a662449ebb443ce5eb6b7bd38db0c99d90cd17aae75e699a9719c3e"
+  },
+  "patch_application_normalization": {
+    "25-platform.patch": {
+      "historical_file_ends_with_newline": false,
+      "historical_hunk_count": 10,
+      "operation": "append one LF to the patch input stream only",
+      "application_stream_sha256": "9be8ed5db4a783a480dfeacae4ec629aac19d1551949ec205cb23db1d967fdeb"
+    }
+  },
+  "post_patch_files": {
+    "include/kernel-defaults.mk": "0a1321f413faad99df460840511d00d558bc3439424a1bca5db9d6c240ff0b75",
+    "target/linux/mediatek/dts/mt7981b-xiaomi-mi-router-ax3000t.dts": "ec65ba06fd02db344ad03e2bfff07eeeba175a206a06f20ccb91cf31a53d450c",
+    "target/linux/mediatek/image/filogic.mk": "f20df95e6039b860db2f57c1956635ac19a267d3133b7e6828c46566b2273d70",
+    "target/linux/mediatek/filogic/base-files/lib/upgrade/platform.sh": "940469508bd11bf595f24bf0ad313de68ee41d9a65643f2290a217d2c54127ec"
+  },
+  "fwtool_format_reference": {
+    "url": "https://git.openwrt.org/project/fwtool.git",
+    "commit": "04cd252e4e9394ffacd51f56f1f124abc534f715"
+  },
+  "signing_tools": {
+    "usign_commit": "c4c72b1b07945ee192361dc751291a7c98d6adcd",
+    "usign_mirror_hash": "889e58b295505bdde749ec260414fd24411ce2437e5049a7d5cf4e410e8cbe9d",
+    "ucert_commit": "57270b247c91f003db6e3ba1a71d6d1fa5710fef",
+    "ucert_mirror_hash": "a926fefa957f42c40caa9f8592f4c63a0a56af9094a9995eb0dfc5d82c9591cf"
+  },
+  "required_image_identity": {
+    "device": "xiaomi,mi-router-ax3000t",
+    "board": "xiaomi_mi-router-ax3000t",
+    "target": "mediatek/filogic",
+    "fixed_partitions_path": "/soc/spi@1100a000/flash@0/partitions",
+    "partition_address_cells": 1,
+    "partition_size_cells": 1,
+    "compiled_partition_order": [
+      "BL2",
+      "Nvram",
+      "Bdata",
+      "Factory",
+      "FIP",
+      "crash",
+      "crash_log",
+      "KF",
+      "ubi"
+    ],
+    "ubi_offset": "0x00600000",
+    "ubi_size": "0x07000000",
+    "forbidden_partition": "ubi_kernel",
+    "compat_version": "2.0",
+    "metadata_dist": "OpenWrt-CSI-Lab",
+    "metadata_version_number": "25.12.5-experimental",
+    "metadata_revision": "r33051-f5dae5ece4",
+    "compat_message": "EXPERIMENTAL: verified 112 MiB single-UBI only; stock dual-UBI must never be forced. 实验镜像：仅适用于已核验的 112 MiB single-UBI；stock dual-UBI 绝不可强制刷入。"
+  }
+}

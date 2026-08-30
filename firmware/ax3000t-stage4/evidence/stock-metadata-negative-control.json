@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "classification": "PUBLIC-REFERENCE-NEGATIVE-CONTROL",
+  "result": "expected-fail",
+  "image": {
+    "name": "kwrt-07.15.2026-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin",
+    "bytes": 40284445,
+    "sha256": "fdb0f654bdc5a804c296a23b6446dfb08d20bc597ac220d30800a24ce0b37e07"
+  },
+  "observed_metadata": {
+    "supported_devices": ["xiaomi,mi-router-ax3000t"],
+    "compat_version": "1.0",
+    "compat_message": null
+  },
+  "required_candidate_metadata": {
+    "new_supported_devices": ["xiaomi,mi-router-ax3000t"],
+    "supported_devices": ["xiaomi,mi-router-ax3000t - Image version mismatch: image 2.0, device 1.0. Please wipe config during upgrade (force required) or reinstall. Reason: EXPERIMENTAL: verified 112 MiB single-UBI only; stock dual-UBI must never be forced. 实验镜像：仅适用于已核验的 112 MiB single-UBI；stock dual-UBI 绝不可强制刷入。"],
+    "compat_version": "2.0",
+    "compat_message": "EXPERIMENTAL: verified 112 MiB single-UBI only; stock dual-UBI must never be forced. 实验镜像：仅适用于已核验的 112 MiB single-UBI；stock dual-UBI 绝不可强制刷入。"
+  },
+  "gates": [
+    {
+      "name": "metadata.compat_version",
+      "status": "expected-fail",
+      "expected": "2.0",
+      "actual": "1.0"
+    },
+    {
+      "name": "metadata.compat_message",
+      "status": "expected-fail",
+      "expected": "exact bilingual single-UBI-only / never-force warning",
+      "actual": null
+    }
+  ],
+  "conclusion": "The stock-compatible 1.0 metadata is deliberately rejected as a release candidate. This public image is reference evidence only and must never be substituted for the Stage4 candidate."
+}

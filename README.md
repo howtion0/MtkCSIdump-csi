@@ -4,8 +4,9 @@ MtkCSIdump turns the CSI reports produced by a patched MediaTek `mt76` driver
 into a documented, portable UDP stream. Its progressive branches preserve the
 capture foundation, harden the AX3000T driver contract, and add an evidence-
 gated coarse-localization layer without pretending that two antennas are a
-camera. Raw I/Q, real RX/TX identities, timing, and PPDU metadata remain
-available at every later stage.
+camera. Stage 4 adds a source-locked, signed firmware build and audit pipeline;
+it does not add an authorized flashing path. Raw I/Q, real RX/TX identities,
+timing, and PPDU metadata remain available at every later stage.
 
 ![Original MtkCSIdump visualizer](https://raw.githubusercontent.com/MtkWifiRev/MtkCSIdump/refs/heads/main/csi_demo.gif)
 
@@ -21,6 +22,7 @@ available at every later stage.
 | `codex/stage-1-capture` | Portable CSI2 capture, parser and GUI | Hardware-free tests passed |
 | `codex/stage-2-driver` | [Hardened MT7915 CSI patch and frozen ABI](driver/mt7915-csi/README.md) | Source/ABI gate only; not loaded on a router |
 | `codex/stage-3-localization` | [Coarse AoA, range proxy, relative CIR and multi-receiver fusion](localization/README.md) | Offline/synthetic gates only; real accuracy remains unmeasured |
+| `codex/stage-4-image` | [Reproducible 112 MiB single-UBI firmware archive pipeline](firmware/ax3000t-stage4/README.md) | Experimental, signed, **DO NOT FLASH** |
 
 Each line is usable as an audit checkpoint. A green source test does not imply
 that a module or firmware image is safe to deploy; deployment has separate
@@ -118,6 +120,27 @@ Real captures, session manifests, room maps and calibration artifacts are
 ignored by default. The recorder creates no-clobber private `0600` capture and
 manifest files; the source distribution is checked against an exact public
 allowlist rather than recursive globs. See [the privacy policy](localization/PRIVACY.md).
+
+## Stage 4: signed image archive, still no flashing path
+
+Stage 4 locks the OpenWrt, historical Kwrt layout, mt76 and Stage 3 source
+identities; builds twice in fresh case-sensitive Docker volumes; compiles only
+after networking is disabled; and verifies FIT, DTB, UBI geometry, kernel ABI,
+package format, CSI defaults, Wi-Fi non-mutation, privacy and the final
+`usign`/`ucert` chain. The maintainer private key stays outside Git and outside
+every retained build/output directory.
+
+The public GitHub Release allowlist is deliberately only four files: the
+generic source-built image, `SHA256SUMS`, `build-provenance.json` and
+`gate-report.json`. It can never include the physical router's MTD/UBI backup,
+Factory/NVRAM data, calibration, MAC addresses or credentials. Read the
+[Stage 4 build guide](firmware/ax3000t-stage4/BUILD.md) and
+[public/private boundary](firmware/ax3000t-stage4/PUBLIC-VS-PRIVATE.md) before
+reviewing an image.
+
+> **EXPERIMENTAL — DO NOT FLASH:** compat 2.0 intentionally blocks both stock
+> dual-UBI and older compat-1.0 single-UBI upgrades unless force is used; force
+> is forbidden. Publication is an auditable backup, not deployment approval.
 
 ## Build
 

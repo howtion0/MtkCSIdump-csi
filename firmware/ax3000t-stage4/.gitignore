@@ -1,0 +1,12 @@
+/work/
+/out/
+/sources/
+/audit/reference-extract/
+/audit/patched-source/
+/evidence/*.stdout.json
+__pycache__/
+*.pyc
+/keys/ax3000t-stage4
+/keys/*.sig
+/keys/*.private
+/keys/*.revoke
