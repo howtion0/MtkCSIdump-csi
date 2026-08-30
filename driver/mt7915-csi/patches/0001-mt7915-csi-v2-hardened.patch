@@ -1,0 +1,1521 @@
+diff --git a/mt76_connac_mcu.h b/mt76_connac_mcu.h
+index fd9cf9c0c32fee5a661bcde99111b9942be3fbcb..f40064f70e64efc0ca51166d08691f68ea3c162a 100644
+--- a/mt76_connac_mcu.h
++++ b/mt76_connac_mcu.h
+@@ -1055,6 +1055,7 @@ enum {
+ 	MCU_EXT_EVENT_BCC_NOTIFY = 0x75,
+ 	MCU_EXT_EVENT_WF_RF_PIN_CTRL = 0x9a,
+ 	MCU_EXT_EVENT_MURU_CTRL = 0x9f,
++	MCU_EXT_EVENT_CSI_REPORT = 0xc2,
+ };
+ 
+ /* unified event table */
+@@ -1271,6 +1272,7 @@ enum {
+ 	MCU_EXT_CMD_DPD_PRE_CAL_INFO = 0xac,
+ 	MCU_EXT_CMD_PHY_STAT_INFO = 0xad,
+ 	MCU_EXT_CMD_WF_RF_PIN_CTRL = 0xbd,
++	MCU_EXT_CMD_CSI_CTRL = 0xc2,
+ };
+ 
+ enum {
+diff --git a/mt7915/Makefile b/mt7915/Makefile
+index 6b0058caafe554f2c405584a39082f4c83bff1fb..ad9361784e0d6330191e5af37ba35ea7e99c7abd 100644
+--- a/mt7915/Makefile
++++ b/mt7915/Makefile
+@@ -1,10 +1,10 @@
+ # SPDX-License-Identifier: BSD-3-Clause-Clear
+ 
+-EXTRA_CFLAGS += -DCONFIG_MT76_LEDS
++ccflags-y += -DCONFIG_MT76_LEDS -DCONFIG_MTK_VENDOR
+ obj-$(CONFIG_MT7915E) += mt7915e.o
+ 
+ mt7915e-y := pci.o init.o dma.o eeprom.o main.o mcu.o mac.o \
+-	     debugfs.o mmio.o
++	     debugfs.o mmio.o vendor.o
+ 
+ mt7915e-$(CONFIG_NL80211_TESTMODE) += testmode.o
+ mt7915e-$(CONFIG_MT798X_WMAC) += soc.o
+diff --git a/mt7915/init.c b/mt7915/init.c
+index 04788db075d195a59bdb237f200f2efbeeffc42d..4c537413977d669bd04e4779e4e2193afb93cd08 100644
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -719,6 +719,12 @@ mt7915_register_ext_phy(struct mt7915_dev *dev, struct mt7915_phy *phy)
+ 	/* init wiphy according to mphy and phy */
+ 	mt7915_init_wiphy(phy);
+ 
++#ifdef CONFIG_MTK_VENDOR
++	INIT_LIST_HEAD(&phy->csi.csi_list);
++	spin_lock_init(&phy->csi.csi_lock);
++	mt7915_vendor_register(phy);
++#endif
++
+ 	ret = mt76_register_phy(mphy, true, mt76_rates,
+ 				ARRAY_SIZE(mt76_rates));
+ 	if (ret)
+@@ -1196,6 +1202,30 @@ void mt7915_set_stream_he_caps(struct mt7915_phy *phy)
+ 	}
+ }
+ 
++#ifdef CONFIG_MTK_VENDOR
++static int mt7915_unregister_features(struct mt7915_phy *phy)
++{
++	struct csi_data *c, *tmp_c;
++
++	spin_lock_bh(&phy->csi.csi_lock);
++	phy->csi.enable = 0;
++
++	list_for_each_entry_safe(c, tmp_c, &phy->csi.csi_list, node) {
++		list_del(&c->node);
++		kfree(c);
++	}
++	kfree(phy->csi.segment);
++	phy->csi.segment = NULL;
++	phy->csi.count = 0;
++	phy->csi.mask = false;
++	phy->csi.reorder = false;
++	phy->csi.last_record_valid = false;
++	spin_unlock_bh(&phy->csi.csi_lock);
++
++	return 0;
++}
++#endif
++
+ static void mt7915_unregister_ext_phy(struct mt7915_dev *dev)
+ {
+ 	struct mt7915_phy *phy = mt7915_ext_phy(dev);
+@@ -1204,6 +1234,10 @@ static void mt7915_unregister_ext_phy(struct mt7915_dev *dev)
+ 	if (!phy)
+ 		return;
+ 
++#ifdef CONFIG_MTK_VENDOR
++	mt7915_unregister_features(phy);
++#endif
++
+ 	mt7915_unregister_thermal(phy);
+ 	mt76_unregister_phy(mphy);
+ 	ieee80211_free_hw(mphy->hw);
+@@ -1216,6 +1250,10 @@ static void mt7915_stop_hardware(struct mt7915_dev *dev)
+ 	mt7915_dma_cleanup(dev);
+ 	tasklet_disable(&dev->mt76.irq_tasklet);
+ 
++#ifdef CONFIG_MTK_VENDOR
++	mt7915_unregister_features(&dev->phy);
++#endif
++
+ 	if (is_mt798x(&dev->mt76))
+ 		mt7986_wmac_disable(dev);
+ }
+@@ -1254,6 +1292,12 @@ int mt7915_register_device(struct mt7915_dev *dev)
+ 	dev->mt76.test_ops = &mt7915_testmode_ops;
+ #endif
+ 
++#ifdef CONFIG_MTK_VENDOR
++	INIT_LIST_HEAD(&dev->phy.csi.csi_list);
++	spin_lock_init(&dev->phy.csi.csi_lock);
++	mt7915_vendor_register(&dev->phy);
++#endif
++
+ 	ret = mt76_register_device(&dev->mt76, true, mt76_rates,
+ 				   ARRAY_SIZE(mt76_rates));
+ 	if (ret)
+diff --git a/mt7915/mcu.c b/mt7915/mcu.c
+index c9567aa9a51602198d654a4530e244e945a307ae..0a174f7b1aa342f437fdc8e7a2a352c5ab5b94ea 100644
+--- a/mt7915/mcu.c
++++ b/mt7915/mcu.c
+@@ -39,6 +39,10 @@ static bool sr_scene_detect = true;
+ module_param(sr_scene_detect, bool, 0644);
+ MODULE_PARM_DESC(sr_scene_detect, "Enable firmware scene detection algorithm");
+ 
++#ifdef CONFIG_MTK_VENDOR
++static int mt7915_mcu_report_csi(struct mt7915_dev *dev, struct sk_buff *skb);
++#endif
++
+ static u8
+ mt7915_mcu_get_sta_nss(u16 mcs_map)
+ {
+@@ -421,6 +425,11 @@ mt7915_mcu_rx_ext_event(struct mt7915_dev *dev, struct sk_buff *skb)
+ 	case MCU_EXT_EVENT_FW_LOG_2_HOST:
+ 		mt7915_mcu_rx_log_message(dev, skb);
+ 		break;
++#ifdef CONFIG_MTK_VENDOR
++	case MCU_EXT_EVENT_CSI_REPORT:
++		mt7915_mcu_report_csi(dev, skb);
++		break;
++#endif
+ 	case MCU_EXT_EVENT_BCC_NOTIFY:
+ 		mt7915_mcu_rx_bcc_notify(dev, skb);
+ 		break;
+@@ -4175,6 +4184,505 @@ out:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_MTK_VENDOR
++int mt7915_mcu_set_csi(struct mt7915_phy *phy, u8 mode,
++		       u8 cfg, u8 v1, u32 v2, u8 *mac_addr)
++{
++	struct mt7915_dev *dev = phy->dev;
++	struct mt7915_mcu_csi req = {
++		.band = phy != &dev->phy,
++		.mode = mode,
++		.cfg = cfg,
++		.v1 = v1,
++		.v2 = cpu_to_le32(v2),
++	};
++
++	if (is_valid_ether_addr(mac_addr))
++		ether_addr_copy(req.mac_addr, mac_addr);
++
++	return mt76_mcu_send_msg(&dev->mt76, MCU_EXT_CMD(CSI_CTRL), &req,
++				 sizeof(req), true);
++}
++
++static int
++mt7915_mcu_parse_csi(const u8 *buf, size_t len, struct csi_data **result,
++		     u8 *band_hint)
++{
++	struct csi_data *csi;
++	const u8 *data_i = NULL, *data_q = NULL;
++	u32 data_i_len = 0, data_q_len = 0;
++	u32 required, seen = 0;
++	u16 available_count, expected_count;
++	bool has_segment;
++	int i, ret = -EINVAL;
++
++	csi = kzalloc(sizeof(*csi), GFP_KERNEL);
++	if (!csi)
++		return -ENOMEM;
++	*band_hint = U8_MAX;
++
++	while (len) {
++		const struct csi_tlv *tlv;
++		const u8 *payload;
++		u32 tag, tlv_len, value;
++
++		if (len < sizeof(*tlv))
++			goto out;
++
++		tlv = (const struct csi_tlv *)buf;
++		tag = get_unaligned_le32(buf);
++		tlv_len = get_unaligned_le32(buf + sizeof(tlv->tag));
++		if (tlv_len > len - sizeof(*tlv))
++			goto out;
++
++		payload = tlv->data;
++		if (tag <= CSI_TLV_MAX_TAG && seen & BIT(tag))
++			goto out;
++
++		switch (tag) {
++		case CSI_EVENT_CSI_I_DATA:
++		case CSI_EVENT_CSI_Q_DATA:
++			if (!tlv_len || tlv_len > CSI_MAX_COUNT * sizeof(s16) ||
++			    tlv_len % sizeof(s16))
++				goto out;
++			if (tag == CSI_EVENT_CSI_I_DATA) {
++				data_i = payload;
++				data_i_len = tlv_len;
++			} else {
++				data_q = payload;
++				data_q_len = tlv_len;
++			}
++			break;
++		case CSI_EVENT_TA:
++			if (tlv_len < ETH_ALEN || tlv_len > 8)
++				goto out;
++			ether_addr_copy(csi->ta, payload);
++			break;
++		case CSI_EVENT_RSVD13:
++		case CSI_EVENT_RSVD14:
++		case CSI_EVENT_RSVD15:
++		case CSI_EVENT_RSVD16:
++			break;
++		case CSI_EVENT_FW_VER:
++		case CSI_EVENT_CBW:
++		case CSI_EVENT_RSSI:
++		case CSI_EVENT_SNR:
++		case CSI_EVENT_BAND:
++		case CSI_EVENT_CSI_NUM:
++		case CSI_EVENT_DBW:
++		case CSI_EVENT_CH_IDX:
++		case CSI_EVENT_EXTRA_INFO:
++		case CSI_EVENT_RX_MODE:
++		case CSI_EVENT_CHAIN_INFO:
++		case CSI_EVENT_TX_RX_IDX:
++		case CSI_EVENT_TS:
++		case CSI_EVENT_PKT_SN:
++		case CSI_EVENT_BW_SEG:
++		case CSI_EVENT_REMAIN_LAST:
++		case CSI_EVENT_TR_STREAM:
++			if (tlv_len != sizeof(__le32))
++				goto out;
++
++			value = get_unaligned_le32(payload);
++			switch (tag) {
++			case CSI_EVENT_FW_VER:
++				csi->fw_ver = value;
++				break;
++			case CSI_EVENT_CBW:
++				if (value > CSI_BW80)
++					goto out;
++				csi->ch_bw = value;
++				break;
++			case CSI_EVENT_RSSI:
++				csi->rssi = value;
++				break;
++			case CSI_EVENT_SNR:
++				csi->snr = value;
++				break;
++			case CSI_EVENT_BAND:
++				if (value > 1)
++					goto out;
++				csi->band = value;
++				*band_hint = value;
++				break;
++			case CSI_EVENT_CSI_NUM:
++				if (!value || value > CSI_MAX_COUNT)
++					goto out;
++				csi->data_num = value;
++				break;
++			case CSI_EVENT_DBW:
++				if (value > CSI_BW80)
++					goto out;
++				csi->data_bw = value;
++				break;
++			case CSI_EVENT_CH_IDX:
++				if (value > U8_MAX)
++					goto out;
++				csi->pri_ch_idx = value;
++				break;
++			case CSI_EVENT_EXTRA_INFO:
++				csi->info = value;
++				break;
++			case CSI_EVENT_RX_MODE:
++				csi->rx_mode = u32_get_bits(value, GENMASK(15, 0));
++				break;
++			case CSI_EVENT_CHAIN_INFO:
++				csi->chain_info = value;
++				break;
++			case CSI_EVENT_TX_RX_IDX:
++				csi->tx_idx = u32_get_bits(value, GENMASK(31, 16));
++				csi->rx_idx = u32_get_bits(value, GENMASK(15, 0));
++				break;
++			case CSI_EVENT_TS:
++				csi->ts = value;
++				break;
++			case CSI_EVENT_PKT_SN:
++				if (value > U16_MAX)
++					goto out;
++				csi->pkt_sn = value;
++				csi->metadata_valid |= MT7915_CSI_VALID_PKT_SN;
++				break;
++			case CSI_EVENT_BW_SEG:
++				csi->segment_num = value;
++				csi->metadata_valid |= MT7915_CSI_VALID_SEGMENT;
++				break;
++			case CSI_EVENT_REMAIN_LAST:
++				if (value > 1)
++					goto out;
++				csi->remain_last = value;
++				csi->metadata_valid |= MT7915_CSI_VALID_REMAIN_LAST;
++				break;
++			case CSI_EVENT_TR_STREAM:
++				if (value > U8_MAX)
++					goto out;
++				csi->tr_stream = value;
++				csi->metadata_valid |= MT7915_CSI_VALID_TR_STREAM;
++				break;
++			default:
++				break;
++			}
++			break;
++		default:
++			/* Future firmware may append tags.  Safely skip them. */
++			break;
++		}
++
++		if (tag <= CSI_TLV_MAX_TAG)
++			seen |= BIT(tag);
++		buf += sizeof(*tlv) + tlv_len;
++		len -= sizeof(*tlv) + tlv_len;
++	}
++
++	required = BIT(CSI_EVENT_CBW) | BIT(CSI_EVENT_BAND) |
++		   BIT(CSI_EVENT_CSI_NUM) | BIT(CSI_EVENT_CSI_I_DATA) |
++		   BIT(CSI_EVENT_CSI_Q_DATA) | BIT(CSI_EVENT_DBW) |
++		   BIT(CSI_EVENT_TA) | BIT(CSI_EVENT_CHAIN_INFO) |
++		   BIT(CSI_EVENT_TX_RX_IDX) | BIT(CSI_EVENT_TS);
++	if ((seen & required) != required ||
++	    data_i_len != data_q_len ||
++	    csi->data_bw > csi->ch_bw)
++		goto out;
++	has_segment = csi->metadata_valid & MT7915_CSI_VALID_SEGMENT;
++	if (has_segment !=
++	    !!(csi->metadata_valid & MT7915_CSI_VALID_REMAIN_LAST))
++		goto out;
++	available_count = data_i_len / sizeof(s16);
++
++	switch (csi->ch_bw) {
++	case CSI_BW20:
++		expected_count = CSI_BW20_DATA_COUNT;
++		break;
++	case CSI_BW40:
++		expected_count = CSI_BW40_DATA_COUNT;
++		break;
++	case CSI_BW80:
++		expected_count = CSI_BW80_DATA_COUNT;
++		break;
++	default:
++		goto out;
++	}
++
++	/*
++	 * MT7981 firmware exists in two wire variants: one trims vector TLVs
++	 * to the active channel width, while another pads every vector to 256
++	 * samples.  Accept both, but never export padding as real subcarriers.
++	 */
++	if (csi->ch_bw == CSI_BW80 && has_segment) {
++		if (csi->data_num > available_count)
++			goto out;
++	} else {
++		if (available_count < expected_count ||
++		    (csi->data_num != expected_count &&
++		     csi->data_num != available_count))
++			goto out;
++		csi->data_num = expected_count;
++	}
++
++	for (i = 0; i < csi->data_num; i++) {
++		csi->data_i[i] = get_unaligned_le16(data_i + i * sizeof(s16));
++		csi->data_q[i] = get_unaligned_le16(data_q + i * sizeof(s16));
++	}
++
++	*result = csi;
++	return 0;
++
++out:
++	kfree(csi);
++	return ret;
++}
++
++static struct mt7915_phy *
++mt7915_csi_get_phy(struct mt7915_dev *dev, u8 band)
++{
++	struct mt7915_phy *phy = &dev->phy;
++	struct mt7915_phy *ext_phy;
++
++	if (phy->mt76->band_idx == band)
++		return phy;
++
++	ext_phy = mt7915_ext_phy(dev);
++	if (ext_phy && ext_phy->mt76->band_idx == band)
++		return ext_phy;
++
++	return NULL;
++}
++
++static bool mt7915_csi_interval_elapsed(u32 now, u32 last, u32 interval)
++{
++	return !interval || (u32)(now - last) >= interval;
++}
++
++enum mt7915_csi_segment_result {
++	MT7915_CSI_SEGMENT_ERROR = -1,
++	MT7915_CSI_SEGMENT_STORED,
++	MT7915_CSI_SEGMENT_READY,
++};
++
++static void mt7915_csi_segment_reset(struct mt7915_phy *phy)
++{
++	kfree(phy->csi.segment);
++	phy->csi.segment = NULL;
++}
++
++static void mt7915_csi_mark_malformed(struct mt7915_phy *phy)
++{
++	spin_lock_bh(&phy->csi.csi_lock);
++	mt7915_csi_segment_reset(phy);
++	phy->csi.malformed++;
++	spin_unlock_bh(&phy->csi.csi_lock);
++}
++
++static bool
++mt7915_csi_segment_matches(const struct csi_data *first,
++			   const struct csi_data *next)
++{
++	u8 pkt_mask = MT7915_CSI_VALID_PKT_SN;
++	u8 stream_mask = MT7915_CSI_VALID_TR_STREAM;
++
++	if ((first->metadata_valid & pkt_mask) != pkt_mask ||
++	    (next->metadata_valid & pkt_mask) != pkt_mask ||
++	    first->pkt_sn != next->pkt_sn ||
++	    first->chain_info != next->chain_info ||
++	    !ether_addr_equal(first->ta, next->ta) ||
++	    first->band != next->band || first->tx_idx != next->tx_idx ||
++	    first->rx_idx != next->rx_idx || first->ch_bw != next->ch_bw ||
++	    first->data_bw != next->data_bw ||
++	    first->pri_ch_idx != next->pri_ch_idx ||
++	    first->rx_mode != next->rx_mode ||
++	    first->segment_num == U32_MAX ||
++	    next->segment_num != first->segment_num + 1)
++		return false;
++
++	if ((first->metadata_valid & stream_mask) !=
++	    (next->metadata_valid & stream_mask))
++		return false;
++
++	return !(first->metadata_valid & stream_mask) ||
++	       first->tr_stream == next->tr_stream;
++}
++
++/* Caller holds csi_lock.  This function consumes @part on every path. */
++static int
++mt7915_csi_reassemble(struct mt7915_phy *phy, struct csi_data *part,
++		      struct csi_data **ready)
++{
++	struct csi_data *first = phy->csi.segment;
++	bool has_segment, has_remain;
++	u16 offset;
++
++	*ready = NULL;
++	has_segment = part->metadata_valid & MT7915_CSI_VALID_SEGMENT;
++	has_remain = part->metadata_valid & MT7915_CSI_VALID_REMAIN_LAST;
++
++	if (first && (part->ch_bw != CSI_BW80 || !has_segment ||
++		      part->segment_num == 0)) {
++		mt7915_csi_segment_reset(phy);
++		phy->csi.malformed++;
++		first = NULL;
++	}
++
++	if (part->ch_bw != CSI_BW80) {
++		if ((has_segment && part->segment_num) ||
++		    (has_remain && part->remain_last))
++			goto malformed;
++
++		*ready = part;
++		return MT7915_CSI_SEGMENT_READY;
++	}
++
++	if (!has_segment) {
++		if (part->data_num != CSI_BW80_DATA_COUNT)
++			goto malformed;
++
++		*ready = part;
++		return MT7915_CSI_SEGMENT_READY;
++	}
++
++	if (part->segment_num == 0) {
++		if (!part->remain_last) {
++			if (part->data_num != CSI_BW80_DATA_COUNT)
++				goto malformed;
++
++			*ready = part;
++			return MT7915_CSI_SEGMENT_READY;
++		}
++
++		if (!(part->metadata_valid & MT7915_CSI_VALID_PKT_SN) ||
++		    part->data_num >= CSI_BW80_DATA_COUNT)
++			goto malformed;
++
++		phy->csi.segment = part;
++		return MT7915_CSI_SEGMENT_STORED;
++	}
++
++	if (!first || !mt7915_csi_segment_matches(first, part) ||
++	    part->data_num > CSI_BW80_DATA_COUNT - first->data_num)
++		goto malformed_sequence;
++
++	offset = first->data_num;
++	memcpy(&first->data_i[offset], part->data_i,
++	       part->data_num * sizeof(first->data_i[0]));
++	memcpy(&first->data_q[offset], part->data_q,
++	       part->data_num * sizeof(first->data_q[0]));
++	first->data_num += part->data_num;
++	first->segment_num = part->segment_num;
++	first->remain_last = part->remain_last;
++	first->metadata_valid |= part->metadata_valid;
++	kfree(part);
++
++	if (first->remain_last) {
++		if (first->data_num >= CSI_BW80_DATA_COUNT)
++			goto malformed_buffer;
++
++		return MT7915_CSI_SEGMENT_STORED;
++	}
++
++	if (first->data_num != CSI_BW80_DATA_COUNT)
++		goto malformed_buffer;
++
++	phy->csi.segment = NULL;
++	*ready = first;
++	return MT7915_CSI_SEGMENT_READY;
++
++malformed_sequence:
++	mt7915_csi_segment_reset(phy);
++	kfree(part);
++	phy->csi.malformed++;
++	return MT7915_CSI_SEGMENT_ERROR;
++
++malformed_buffer:
++	mt7915_csi_segment_reset(phy);
++	phy->csi.malformed++;
++	return MT7915_CSI_SEGMENT_ERROR;
++
++malformed:
++	kfree(part);
++	phy->csi.malformed++;
++	return MT7915_CSI_SEGMENT_ERROR;
++}
++
++static int
++mt7915_mcu_report_csi(struct mt7915_dev *dev, struct sk_buff *skb)
++{
++	struct mt7915_phy *phy;
++	struct csi_data *csi, *ready, *old = NULL;
++	u8 band_hint;
++	int ret;
++
++	if (skb->len < sizeof(struct mt76_connac2_mcu_rxd))
++		return -EINVAL;
++
++	skb_pull(skb, sizeof(struct mt76_connac2_mcu_rxd));
++	ret = mt7915_mcu_parse_csi(skb->data, skb->len, &csi, &band_hint);
++	if (ret) {
++		if (ret != -ENOMEM) {
++			phy = band_hint <= 1 ?
++				mt7915_csi_get_phy(dev, band_hint) : NULL;
++			if (phy) {
++				mt7915_csi_mark_malformed(phy);
++			} else {
++				struct mt7915_phy *ext_phy = mt7915_ext_phy(dev);
++
++				mt7915_csi_mark_malformed(&dev->phy);
++				if (ext_phy)
++					mt7915_csi_mark_malformed(ext_phy);
++			}
++		}
++		return ret;
++	}
++
++	phy = mt7915_csi_get_phy(dev, csi->band);
++	if (!phy) {
++		kfree(csi);
++		return -EINVAL;
++	}
++
++	INIT_LIST_HEAD(&csi->node);
++	spin_lock_bh(&phy->csi.csi_lock);
++
++	if (!phy->csi.enable) {
++		spin_unlock_bh(&phy->csi.csi_lock);
++		kfree(csi);
++		return 0;
++	}
++
++	ret = mt7915_csi_reassemble(phy, csi, &ready);
++	if (ret != MT7915_CSI_SEGMENT_READY) {
++		spin_unlock_bh(&phy->csi.csi_lock);
++		return ret == MT7915_CSI_SEGMENT_ERROR ? -EINVAL : 0;
++	}
++	csi = ready;
++
++	if (phy->csi.last_record_valid &&
++	    !mt7915_csi_interval_elapsed(csi->ts, phy->csi.last_record,
++					   phy->csi.interval)) {
++		spin_unlock_bh(&phy->csi.csi_lock);
++		kfree(csi);
++		return 0;
++	}
++
++	if (phy->csi.count >= CSI_MAX_BUF_NUM) {
++		old = list_first_entry(&phy->csi.csi_list,
++				       struct csi_data, node);
++		list_del(&old->node);
++		phy->csi.count--;
++		phy->csi.dropped++;
++	}
++
++	list_add_tail(&csi->node, &phy->csi.csi_list);
++	phy->csi.count++;
++
++	if (csi->chain_info & BIT(15)) {
++		phy->csi.last_record = csi->ts;
++		phy->csi.last_record_valid = true;
++	}
++	spin_unlock_bh(&phy->csi.csi_lock);
++	kfree(old);
++
++	return 0;
++}
++#endif
++
+ int mt7915_mcu_rf_regval(struct mt7915_dev *dev, u32 regidx, u32 *val, bool set)
+ {
+ 	struct {
+diff --git a/mt7915/mcu.h b/mt7915/mcu.h
+index f12969d202cc821fecdf902289bc8860f0ec6357..9e30b11d21b63ceb175dd63d42cfccb33c101c7a 100644
+--- a/mt7915/mcu.h
++++ b/mt7915/mcu.h
+@@ -533,4 +533,53 @@ enum {
+ 					 sizeof(struct bss_info_bmc_rate) +\
+ 					 sizeof(struct bss_info_ext_bss))
+ 
++#ifdef CONFIG_MTK_VENDOR
++struct mt7915_mcu_csi {
++	u8 band;
++	u8 mode;
++	u8 cfg;
++	u8 v1;
++	__le32 v2;
++	u8 mac_addr[ETH_ALEN];
++	u8 _rsv[34];
++} __packed;
++
++struct csi_tlv {
++	__le32 tag;
++	__le32 len;
++	u8 data[];
++} __packed;
++
++#define CSI_MAX_COUNT	256
++#define CSI_MAX_BUF_NUM	512
++#define CSI_TLV_MAX_TAG	23
++
++enum mt7915_csi_event_tag {
++	CSI_EVENT_FW_VER,
++	CSI_EVENT_CBW,
++	CSI_EVENT_RSSI,
++	CSI_EVENT_SNR,
++	CSI_EVENT_BAND,
++	CSI_EVENT_CSI_NUM,
++	CSI_EVENT_CSI_I_DATA,
++	CSI_EVENT_CSI_Q_DATA,
++	CSI_EVENT_DBW,
++	CSI_EVENT_CH_IDX,
++	CSI_EVENT_TA,
++	CSI_EVENT_EXTRA_INFO,
++	CSI_EVENT_RX_MODE,
++	CSI_EVENT_RSVD13,
++	CSI_EVENT_RSVD14,
++	CSI_EVENT_RSVD15,
++	CSI_EVENT_RSVD16,
++	CSI_EVENT_CHAIN_INFO,
++	CSI_EVENT_TX_RX_IDX,
++	CSI_EVENT_TS,
++	CSI_EVENT_PKT_SN,
++	CSI_EVENT_BW_SEG,
++	CSI_EVENT_REMAIN_LAST,
++	CSI_EVENT_TR_STREAM,
++};
++#endif
++
+ #endif
+diff --git a/mt7915/mt7915.h b/mt7915/mt7915.h
+index b2fc713816360c7b49fbb8c3b20e52877607a2cf..f768d98fb5b06e61064bdcab8b3428c10c1ebd93 100644
+--- a/mt7915/mt7915.h
++++ b/mt7915/mt7915.h
+@@ -197,6 +197,50 @@ struct mt7915_hif {
+ 	u32 index;
+ };
+ 
++#ifdef CONFIG_MTK_VENDOR
++enum mt7915_csi_bw {
++	CSI_BW20,
++	CSI_BW40,
++	CSI_BW80,
++};
++
++#define CSI_BW20_DATA_COUNT	64
++#define CSI_BW40_DATA_COUNT	128
++#define CSI_BW80_DATA_COUNT	256
++
++#define MT7915_CSI_VALID_PKT_SN		BIT(0)
++#define MT7915_CSI_VALID_SEGMENT		BIT(1)
++#define MT7915_CSI_VALID_REMAIN_LAST	BIT(2)
++#define MT7915_CSI_VALID_TR_STREAM	BIT(3)
++
++struct csi_data {
++	u8 fw_ver;
++	u8 ch_bw;
++	u16 data_num;
++	s16 data_i[CSI_BW80_DATA_COUNT];
++	s16 data_q[CSI_BW80_DATA_COUNT];
++	u8 band;
++	s8 rssi;
++	u8 snr;
++	u32 ts;
++	u8 data_bw;
++	u8 pri_ch_idx;
++	u8 ta[ETH_ALEN];
++	u32 info;
++	u8 rx_mode;
++	u32 chain_info;
++	u16 tx_idx;
++	u16 rx_idx;
++	u16 pkt_sn;
++	u32 segment_num;
++	u8 remain_last;
++	u8 tr_stream;
++	u8 metadata_valid;
++
++	struct list_head node;
++};
++#endif
++
+ struct mt7915_phy {
+ 	struct mt76_phy *mt76;
+ 	struct mt7915_dev *dev;
+@@ -242,6 +286,25 @@ struct mt7915_phy {
+ 		u8 spe_idx;
+ 	} test;
+ #endif
++
++#ifdef CONFIG_MTK_VENDOR
++	struct {
++		struct list_head csi_list;
++		/* protects the CSI queue and all fields below */
++		spinlock_t csi_lock;
++		struct csi_data *segment;
++		u32 count;
++		bool mask;
++		bool reorder;
++		bool enable;
++
++		u32 interval;
++		u32 last_record;
++		bool last_record_valid;
++		u32 dropped;
++		u32 malformed;
++	} csi;
++#endif
+ };
+ 
+ struct mt7915_dev {
+@@ -632,4 +695,10 @@ void mt7915_sta_add_debugfs(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
+ int mt7915_mmio_wed_init(struct mt7915_dev *dev, void *pdev_ptr,
+ 			 bool pci, int *irq);
+ 
++#ifdef CONFIG_MTK_VENDOR
++void mt7915_vendor_register(struct mt7915_phy *phy);
++int mt7915_mcu_set_csi(struct mt7915_phy *phy, u8 mode,
++		       u8 cfg, u8 v1, u32 v2, u8 *mac_addr);
++#endif
++
+ #endif
+diff --git a/mt7915/vendor.c b/mt7915/vendor.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..575a4bff026e9d1e468138ddda7a1a4eac50221d
+--- /dev/null
++++ b/mt7915/vendor.c
+@@ -0,0 +1,635 @@
++// SPDX-License-Identifier: ISC
++/*
++ * Copyright (C) 2020, MediaTek Inc. All rights reserved.
++ */
++
++#include <net/netlink.h>
++
++#include "mt7915.h"
++#include "mcu.h"
++#include "vendor.h"
++
++static const struct nla_policy
++csi_ctrl_policy[NUM_MTK_VENDOR_ATTRS_CSI_CTRL] = {
++	[MTK_VENDOR_ATTR_CSI_CTRL_CFG] = {.type = NLA_NESTED },
++	[MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE] = { .type = NLA_U8 },
++	[MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE] = { .type = NLA_U8 },
++	[MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1] = { .type = NLA_U8 },
++	/* VAL2 was emitted as both u8 and u32 by historical user space. */
++	[MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2] = { .type = NLA_UNSPEC },
++	[MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR] = { .type = NLA_NESTED },
++	[MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL] = { .type = NLA_U32 },
++	[MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM] = { .type = NLA_U16 },
++	[MTK_VENDOR_ATTR_CSI_CTRL_DATA] = { .type = NLA_NESTED },
++};
++
++struct csi_null_tone {
++	u8 start;
++	u8 end;
++};
++
++struct csi_reorder {
++	u8 dest;
++	u8 start;
++	u8 end;
++};
++
++struct csi_mask {
++	struct csi_null_tone null[10];
++	u8 pilot[8];
++	struct csi_reorder ro[3];
++};
++
++static const struct csi_mask csi_mask_groups[] = {
++	/* OFDM */
++	{ .null = { { 0 }, { 27, 37 } },
++	  .ro = { {0, 0, 63} },
++	},
++	{ .null = { { 0, 69 }, { 96 }, { 123, 127 } },
++	  .ro = { { 0, 96 }, { 38, 70, 95 }, { 1, 97, 122 } },
++	},
++	{ .null = { { 0, 5 }, { 32 }, { 59, 127 } },
++	  .ro = { { 0, 32 }, { 38, 6, 31 }, { 1, 33, 58 } },
++	},
++	{ .null = { { 0, 5 }, { 32 }, { 59, 69 }, { 96 }, { 123, 127 } },
++	  .ro = { { 0, 0, 127 } },
++	},
++	{ .null = { { 0, 133 }, { 160 }, { 187, 255 } },
++	  .ro = { { 0, 160 }, { 1, 161, 186 }, { 38, 134, 159 } },
++	},
++	{ .null = { { 0, 197 }, { 224 }, { 251, 255 } },
++	  .ro = { { 0, 224 }, { 1, 225, 250 }, { 38, 198, 223 } },
++	},
++	{ .null = { { 0, 5 }, { 32 }, { 59, 255 } },
++	  .ro = { { 0, 32 }, { 1, 33, 58 }, { 38, 6, 31 } },
++	},
++	{ .null = { { 0, 69 }, { 96 }, { 123, 255 } },
++	  .ro = { { 0, 96 }, { 1, 97, 122 }, { 38, 70, 95 } },
++	},
++	{ .null = { { 0, 133 }, { 160 }, { 187, 197 }, { 224 }, { 251, 255 } },
++	  .ro = { { 0, 192 }, { 2, 198, 250 }, { 74, 134, 186 } },
++	},
++	{ .null = { { 0, 5 }, { 32 }, { 59, 69 }, { 96 }, { 123, 255 } },
++	  .ro = { { 0, 64 }, { 2, 70, 122 }, { 74, 6, 58 } },
++	},
++	{ .null = { { 0, 5 }, { 32 }, { 59, 69 }, { 96 }, { 123, 133 },
++		    { 160 }, { 187, 197 }, { 224 }, { 251, 255 } },
++	  .ro = { { 0, 0, 255 } },
++	},
++
++	/* HT/VHT */
++	{ .null = { { 0 }, { 29, 35 } },
++	  .pilot = { 7, 21, 43, 57 },
++	  .ro = { { 0, 0, 63 } },
++	},
++	{ .null = { { 0, 67 }, { 96 }, { 125, 127 } },
++	  .pilot = { 75, 89, 103, 117 },
++	  .ro = { { 0, 96 }, { 36, 68, 95 }, { 1, 97, 124 } },
++	},
++	{ .null = { { 0, 3 }, { 32 }, { 61, 127 } },
++	  .pilot = { 11, 25, 39, 53 },
++	  .ro = { { 0, 32 }, { 36, 4, 31 }, { 1, 33, 60 } },
++	},
++	{ .null = { { 0, 1 }, { 59, 69 }, { 127 } },
++	  .pilot = { 11, 25, 53, 75, 103, 117 },
++	  .ro = { { 0, 0, 127 } },
++	},
++	{ .null = { { 0, 131 }, { 160 }, { 189, 255 } },
++	  .pilot = { 139, 153, 167, 181 },
++	  .ro = { { 0, 160 }, { 1, 161, 188 }, { 36, 132, 159 } },
++	},
++	{ .null = { { 0, 195 }, { 224 }, { 253 }, { 255 } },
++	  .pilot = { 203, 217, 231, 245 },
++	  .ro = { { 0, 224 }, { 1, 225, 252 }, { 36, 196, 223 } },
++	},
++	{ .null = { { 0, 3 }, { 32 }, { 61, 255 } },
++	  .pilot = { 11, 25, 39, 53 },
++	  .ro = { { 0, 32 }, { 1, 33, 60 }, { 36, 4, 31 } },
++	},
++	{ .null = { { 0, 67 }, { 96 }, { 125, 255 } },
++	  .pilot = { 75, 89, 103, 117 },
++	  .ro = { { 0, 96 }, { 1, 97, 124 }, { 36, 68, 95 } },
++	},
++	{ .null = { { 0, 133 }, { 191, 193 }, { 251, 255 } },
++	  .pilot = { 139, 167, 181, 203, 217, 245 },
++	  .ro = { { 0, 192 }, { 2, 194, 250 }, { 70, 134, 190 } },
++	},
++	{ .null = { { 0, 5 }, { 63, 65 }, { 123, 127 } },
++	  .pilot = { 11, 39, 53, 75, 89, 117 },
++	  .ro = { { 0, 64 }, { 2, 66, 122 }, { 70, 6, 62 } },
++	},
++	{ .null = { { 0, 1 }, { 123, 133 }, { 255 } },
++	  .pilot = { 11, 39, 75, 103, 153, 181, 217, 245 },
++	  .ro = { { 0, 0, 255 } },
++	},
++
++	/* HE */
++	{ .null = { { 0 }, { 31, 33 } },
++	  .pilot = { 12, 29, 35, 52 },
++	  .ro = { { 0, 0, 63 } },
++	},
++	{ .null = { { 30, 34 }, { 96 } },
++	  .pilot = { 4, 21, 43, 60, 70, 87, 105, 122 },
++	  .ro = { { 0, 96 }, { 34, 66, 95 }, { 1, 97, 126 } },
++	},
++	{ .null = { { 32 }, { 94, 98 } },
++	  .pilot = { 6, 23, 41, 58, 68, 85, 107, 124 },
++	  .ro = { { 0, 32 }, { 34, 2, 31 }, { 1, 31, 62 } },
++	},
++	{ .null = { { 0 }, { 62, 66 } },
++	  .pilot = { 9, 26, 36, 53, 75, 92, 102, 119 },
++	  .ro = { { 0, 0, 127 } },
++	},
++	{ .null = { { 30, 34 }, { 160 } },
++	  .pilot = { 4, 21, 43, 60, 137, 154, 166, 183 },
++	  .ro = { { 0, 160 }, { 1, 161, 190 }, { 34, 130, 159 } },
++	},
++	{ .null = { { 94, 98 }, { 224 } },
++	  .pilot = { 68, 85, 107, 124, 201, 218, 230, 247 },
++	  .ro = { { 0, 224 }, { 1, 225, 254 }, { 34, 194, 223 } },
++	},
++	{ .null = { { 32 }, { 158, 162 } },
++	  .pilot = { 9, 26, 38, 55, 132, 149, 171, 188 },
++	  .ro = { { 0, 32 }, { 1, 33, 62 }, { 34, 2, 31 } },
++	},
++	{ .null = { { 96 }, { 222, 226 } },
++	  .pilot = { 73, 90, 102, 119, 196, 213, 235, 252 },
++	  .ro = { { 0, 96 }, { 1, 97, 126 }, { 34, 66, 95 } },
++	},
++	{ .null = { { 62, 66 }, { 192 } },
++	  .pilot = { 36, 53, 75, 92, 169, 186, 198, 215 },
++	  .ro = { { 0, 192 }, { 1, 193, 253 }, { 67, 131, 191 } },
++	},
++	{ .null = { { 64 }, { 190, 194 } },
++	  .pilot = { 41, 58, 70, 87, 164, 181, 203, 220 },
++	  .ro = { { 0, 64 }, { 1, 65, 125 }, { 67, 3, 63 } },
++	},
++	{ .null = { { 0 }, { 126, 130 } },
++	  .pilot = { 6, 23, 100, 117, 139, 156, 233, 250 },
++	  .ro = { { 0, 0, 255 } },
++	},
++};
++
++static int csi_group_idx(u8 mode, u8 ch_bw, u8 data_bw, u8 pri_ch_idx)
++{
++	u8 group;
++
++	if (mode > 2 || ch_bw > CSI_BW80 || data_bw > ch_bw)
++		return -EINVAL;
++
++	if (ch_bw < 2 || data_bw < 1)
++		group = ch_bw * ch_bw + pri_ch_idx;
++	else
++		group = ch_bw * ch_bw + (data_bw + 1) * 2 + pri_ch_idx;
++
++	if (group >= 11)
++		return -EINVAL;
++
++	return mode * 11 + group;
++}
++
++static int mt7915_csi_parse_mac(struct nlattr *attr, u8 *mac_addr)
++{
++	bool seen[ETH_ALEN] = {};
++	struct nlattr *cur;
++	int count = 0, rem;
++
++	nla_for_each_nested(cur, attr, rem) {
++		u16 idx = nla_type(cur);
++
++		if (idx >= ETH_ALEN || seen[idx] || nla_len(cur) != sizeof(u8))
++			return -EINVAL;
++
++		mac_addr[idx] = nla_get_u8(cur);
++		seen[idx] = true;
++		count++;
++	}
++
++	if (rem || count != ETH_ALEN || !is_valid_ether_addr(mac_addr))
++		return -EINVAL;
++
++	return 0;
++}
++
++static void mt7915_csi_free_list(struct list_head *list)
++{
++	struct csi_data *csi, *tmp;
++
++	list_for_each_entry_safe(csi, tmp, list, node) {
++		list_del(&csi->node);
++		kfree(csi);
++	}
++}
++
++static int mt7915_vendor_csi_ctrl(struct wiphy *wiphy,
++				  struct wireless_dev *wdev,
++				  const void *data,
++				  int data_len)
++{
++	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
++	struct mt7915_phy *phy = mt7915_hw_phy(hw);
++	struct nlattr *tb[NUM_MTK_VENDOR_ATTRS_CSI_CTRL] = {};
++	struct csi_data *segment = NULL;
++	LIST_HEAD(free_list);
++	int err;
++
++	err = nla_parse(tb, MTK_VENDOR_ATTR_CSI_CTRL_MAX, data, data_len,
++			csi_ctrl_policy, NULL);
++	if (err)
++		return err;
++
++	if (tb[MTK_VENDOR_ATTR_CSI_CTRL_CFG]) {
++		bool seen_mode = false, seen_type = false;
++		bool seen_v1 = false, seen_v2 = false;
++		u8 mode = 0, type = 0, v1 = 0;
++		u8 mac_addr[ETH_ALEN] = {};
++		struct nlattr *cur;
++		u32 v2 = 0;
++		int rem;
++
++		nla_for_each_nested(cur, tb[MTK_VENDOR_ATTR_CSI_CTRL_CFG], rem) {
++			switch (nla_type(cur)) {
++			case MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE:
++				if (seen_mode || nla_len(cur) != sizeof(u8))
++					return -EINVAL;
++				mode = nla_get_u8(cur);
++				seen_mode = true;
++				break;
++			case MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE:
++				if (seen_type || nla_len(cur) != sizeof(u8))
++					return -EINVAL;
++				type = nla_get_u8(cur);
++				seen_type = true;
++				break;
++			case MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1:
++				if (seen_v1 || nla_len(cur) != sizeof(u8))
++					return -EINVAL;
++				v1 = nla_get_u8(cur);
++				seen_v1 = true;
++				break;
++			case MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2:
++				if (seen_v2)
++					return -EINVAL;
++				if (nla_len(cur) == sizeof(u8))
++					v2 = nla_get_u8(cur);
++				else if (nla_len(cur) == sizeof(u32))
++					v2 = nla_get_u32(cur);
++				else
++					return -EINVAL;
++				seen_v2 = true;
++				break;
++			default:
++				return -EINVAL;
++			}
++		}
++
++		if (rem || !seen_mode || mode > 2)
++			return -EINVAL;
++
++		if (tb[MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR]) {
++			struct nlattr *mac;
++
++			mac = tb[MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR];
++			err = mt7915_csi_parse_mac(mac, mac_addr);
++			if (err)
++				return err;
++		}
++
++		err = mt7915_mcu_set_csi(phy, mode, type, v1, v2, mac_addr);
++		if (err)
++			return err;
++
++		spin_lock_bh(&phy->csi.csi_lock);
++		phy->csi.enable = !!mode;
++		segment = phy->csi.segment;
++		phy->csi.segment = NULL;
++
++		if (mode == 2 && type == 5) {
++			phy->csi.mask = v1 >= 1;
++			phy->csi.reorder = v1 == 2;
++		}
++
++		if (mode == 0 || mode == 2) {
++			list_splice_init(&phy->csi.csi_list, &free_list);
++			phy->csi.count = 0;
++		}
++
++		if (mode == 0 || mode == 1) {
++			phy->csi.last_record = 0;
++			phy->csi.last_record_valid = false;
++		}
++		spin_unlock_bh(&phy->csi.csi_lock);
++
++		kfree(segment);
++		mt7915_csi_free_list(&free_list);
++	}
++
++	if (tb[MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL]) {
++		spin_lock_bh(&phy->csi.csi_lock);
++		phy->csi.interval =
++			nla_get_u32(tb[MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL]);
++		phy->csi.last_record_valid = false;
++		spin_unlock_bh(&phy->csi.csi_lock);
++	}
++
++	return 0;
++}
++
++static void
++mt7915_vendor_csi_tone_mask(struct csi_data *csi, bool mask, bool reorder)
++{
++	const struct csi_mask *cmask;
++	u8 mode, pri_ch_idx = csi->pri_ch_idx;
++	int group, i;
++
++	if (!mask || csi->rx_mode == MT_PHY_TYPE_CCK)
++		return;
++
++	switch (csi->rx_mode) {
++	case MT_PHY_TYPE_OFDM:
++		mode = 0;
++		break;
++	case MT_PHY_TYPE_HT:
++	case MT_PHY_TYPE_VHT:
++		mode = 1;
++		break;
++	case MT_PHY_TYPE_HE_SU:
++		mode = 2;
++		break;
++	default:
++		return;
++	}
++
++	if (csi->data_bw == CSI_BW40)
++		pri_ch_idx /= 2;
++
++	group = csi_group_idx(mode, csi->ch_bw, csi->data_bw, pri_ch_idx);
++	if (group < 0 || group >= (int)ARRAY_SIZE(csi_mask_groups))
++		return;
++
++	cmask = &csi_mask_groups[group];
++	for (i = 0; i < ARRAY_SIZE(cmask->null); i++) {
++		const struct csi_null_tone *ntone = &cmask->null[i];
++		u16 start = ntone->start;
++		u16 end = ntone->end;
++		int j;
++
++		if (!start && !end && i > 0)
++			break;
++		if (!end)
++			end = start;
++		if (start >= csi->data_num)
++			continue;
++		end = min_t(u16, end, csi->data_num - 1);
++
++		for (j = start; j <= end; j++) {
++			csi->data_i[j] = 0;
++			csi->data_q[j] = 0;
++		}
++	}
++
++	for (i = 0; i < ARRAY_SIZE(cmask->pilot); i++) {
++		u16 pilot = cmask->pilot[i];
++
++		if (!pilot)
++			break;
++		if (pilot >= csi->data_num)
++			continue;
++
++		csi->data_i[pilot] = 0;
++		csi->data_q[pilot] = 0;
++	}
++
++	if (!reorder)
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(cmask->ro); i++) {
++		const struct csi_reorder *ro = &cmask->ro[i];
++		u16 count, dest = ro->dest;
++		u16 start = ro->start;
++		u16 end = ro->end;
++
++		if (!dest && !start && !end)
++			break;
++		if (dest == start)
++			continue;
++		if (dest >= csi->data_num || start >= csi->data_num)
++			continue;
++
++		if (!end) {
++			csi->data_i[dest] = csi->data_i[start];
++			csi->data_q[dest] = csi->data_q[start];
++			continue;
++		}
++
++		if (end < start || end >= csi->data_num)
++			continue;
++		count = end - start + 1;
++		if (dest + count > csi->data_num)
++			continue;
++
++		memmove(&csi->data_i[dest], &csi->data_i[start],
++			count * sizeof(csi->data_i[0]));
++		memmove(&csi->data_q[dest], &csi->data_q[start],
++			count * sizeof(csi->data_q[0]));
++	}
++}
++
++static int
++mt7915_csi_put_mac(struct sk_buff *skb, const u8 *mac)
++{
++	struct nlattr *nest;
++	int i;
++
++	nest = nla_nest_start(skb, MTK_VENDOR_ATTR_CSI_DATA_TA);
++	if (!nest)
++		return -EMSGSIZE;
++
++	for (i = 0; i < ETH_ALEN; i++) {
++		if (nla_put_u8(skb, i, mac[i])) {
++			nla_nest_cancel(skb, nest);
++			return -EMSGSIZE;
++		}
++	}
++
++	nla_nest_end(skb, nest);
++	return 0;
++}
++
++static int
++mt7915_csi_put_vector(struct sk_buff *skb, int attr, const s16 *values,
++		      u16 count)
++{
++	struct nlattr *nest;
++	int i;
++
++	nest = nla_nest_start(skb, attr);
++	if (!nest)
++		return -EMSGSIZE;
++
++	for (i = 0; i < count; i++) {
++		if (nla_put_u16(skb, i, values[i])) {
++			nla_nest_cancel(skb, nest);
++			return -EMSGSIZE;
++		}
++	}
++
++	nla_nest_end(skb, nest);
++	return 0;
++}
++
++static int
++mt7915_csi_put_record(struct sk_buff *skb, const struct csi_data *csi)
++{
++	struct nlattr *record;
++
++	record = nla_nest_start(skb, MTK_VENDOR_ATTR_CSI_CTRL_DATA);
++	if (!record)
++		return -EMSGSIZE;
++
++	if (nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_VER, 2) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_RSSI, csi->rssi) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_SNR, csi->snr) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_BW, csi->data_bw) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_CH_IDX,
++		       csi->pri_ch_idx) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_MODE, csi->rx_mode) ||
++	    nla_put_u16(skb, MTK_VENDOR_ATTR_CSI_DATA_TX_ANT, csi->tx_idx) ||
++	    nla_put_u16(skb, MTK_VENDOR_ATTR_CSI_DATA_RX_ANT, csi->rx_idx) ||
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_INFO, csi->info) ||
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_H_IDX,
++			csi->chain_info) ||
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_TS, csi->ts) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_CH_BW, csi->ch_bw) ||
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_NUM, csi->data_num) ||
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO,
++			csi->chain_info) ||
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_BAND, csi->band))
++		goto nla_put_failure;
++
++	if ((csi->metadata_valid & MT7915_CSI_VALID_PKT_SN) &&
++	    nla_put_u16(skb, MTK_VENDOR_ATTR_CSI_DATA_PKT_SN, csi->pkt_sn))
++		goto nla_put_failure;
++	if ((csi->metadata_valid & MT7915_CSI_VALID_SEGMENT) &&
++	    nla_put_u32(skb, MTK_VENDOR_ATTR_CSI_DATA_SEGMENT_NUM,
++			csi->segment_num))
++		goto nla_put_failure;
++	if ((csi->metadata_valid & MT7915_CSI_VALID_REMAIN_LAST) &&
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_REMAIN_LAST,
++		       csi->remain_last))
++		goto nla_put_failure;
++	if ((csi->metadata_valid & MT7915_CSI_VALID_TR_STREAM) &&
++	    nla_put_u8(skb, MTK_VENDOR_ATTR_CSI_DATA_TR_STREAM,
++		       csi->tr_stream))
++		goto nla_put_failure;
++
++	if (mt7915_csi_put_mac(skb, csi->ta) ||
++	    mt7915_csi_put_vector(skb, MTK_VENDOR_ATTR_CSI_DATA_I,
++				  csi->data_i, csi->data_num) ||
++	    mt7915_csi_put_vector(skb, MTK_VENDOR_ATTR_CSI_DATA_Q,
++				  csi->data_q, csi->data_num))
++		goto nla_put_failure;
++
++	nla_nest_end(skb, record);
++	return 0;
++
++nla_put_failure:
++	nla_nest_cancel(skb, record);
++	return -EMSGSIZE;
++}
++
++static int
++mt7915_vendor_csi_ctrl_dump(struct wiphy *wiphy, struct wireless_dev *wdev,
++			    struct sk_buff *skb, const void *data, int data_len,
++			    unsigned long *storage)
++{
++#define CSI_DUMP_LIMIT_SET	BIT(31)
++#define CSI_DUMP_LIMIT_MASK	GENMASK(15, 0)
++	struct ieee80211_hw *hw = wiphy_to_ieee80211_hw(wiphy);
++	struct mt7915_phy *phy = mt7915_hw_phy(hw);
++	struct nlattr *tb[NUM_MTK_VENDOR_ATTRS_CSI_CTRL] = {};
++	struct csi_data *csi;
++	bool mask, reorder, requeued = false;
++	u16 limit;
++	int err, queued;
++
++	if (!(*storage & CSI_DUMP_LIMIT_SET)) {
++		if (data) {
++			err = nla_parse(tb, MTK_VENDOR_ATTR_CSI_CTRL_MAX,
++					data, data_len, csi_ctrl_policy, NULL);
++			if (err)
++				return err;
++		}
++
++		limit = tb[MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM] ?
++			nla_get_u16(tb[MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM]) :
++			U16_MAX;
++		*storage = CSI_DUMP_LIMIT_SET | limit;
++	}
++
++	limit = *storage & CSI_DUMP_LIMIT_MASK;
++	if (!limit)
++		return -ENOENT;
++
++	spin_lock_bh(&phy->csi.csi_lock);
++	if (list_empty(&phy->csi.csi_list)) {
++		spin_unlock_bh(&phy->csi.csi_lock);
++		return 0;
++	}
++
++	csi = list_first_entry(&phy->csi.csi_list, struct csi_data, node);
++	list_del_init(&csi->node);
++	phy->csi.count--;
++	mask = phy->csi.mask;
++	reorder = phy->csi.reorder;
++	spin_unlock_bh(&phy->csi.csi_lock);
++
++	mt7915_vendor_csi_tone_mask(csi, mask, reorder);
++	err = mt7915_csi_put_record(skb, csi);
++	if (err) {
++		spin_lock_bh(&phy->csi.csi_lock);
++		if (phy->csi.enable && phy->csi.count < CSI_MAX_BUF_NUM) {
++			list_add(&csi->node, &phy->csi.csi_list);
++			phy->csi.count++;
++			requeued = true;
++		} else {
++			phy->csi.dropped++;
++		}
++		spin_unlock_bh(&phy->csi.csi_lock);
++
++		if (!requeued)
++			kfree(csi);
++		return err;
++	}
++
++	kfree(csi);
++	limit--;
++	*storage = CSI_DUMP_LIMIT_SET | limit;
++
++	spin_lock_bh(&phy->csi.csi_lock);
++	queued = phy->csi.count;
++	spin_unlock_bh(&phy->csi.csi_lock);
++
++	return limit ? queued : 0;
++}
++
++static const struct wiphy_vendor_command mt7915_vendor_commands[] = {
++	{
++		.info = {
++			.vendor_id = MTK_NL80211_VENDOR_ID,
++			.subcmd = MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL,
++		},
++		.flags = WIPHY_VENDOR_CMD_NEED_NETDEV |
++			 WIPHY_VENDOR_CMD_NEED_RUNNING,
++		.doit = mt7915_vendor_csi_ctrl,
++		.dumpit = mt7915_vendor_csi_ctrl_dump,
++		.policy = csi_ctrl_policy,
++		.maxattr = MTK_VENDOR_ATTR_CSI_CTRL_MAX,
++	}
++};
++
++void mt7915_vendor_register(struct mt7915_phy *phy)
++{
++	phy->mt76->hw->wiphy->vendor_commands = mt7915_vendor_commands;
++	phy->mt76->hw->wiphy->n_vendor_commands = ARRAY_SIZE(mt7915_vendor_commands);
++}
+diff --git a/mt7915/vendor.h b/mt7915/vendor.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..23f320b5ca6c5b9319da0bfdb430fd5661b8058e
+--- /dev/null
++++ b/mt7915/vendor.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: ISC */
++#ifndef __MT7915_VENDOR_H
++#define __MT7915_VENDOR_H
++
++#define MTK_NL80211_VENDOR_ID	0x0ce7
++
++enum mtk_nl80211_vendor_subcmds {
++	MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL = 0xc2,
++};
++
++enum mtk_vendor_attr_csi_ctrl {
++	MTK_VENDOR_ATTR_CSI_CTRL_UNSPEC,
++
++	MTK_VENDOR_ATTR_CSI_CTRL_CFG,
++	MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE,
++	MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE,
++	MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1,
++	MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2,
++	MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR,
++	MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL,
++
++	MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM,
++
++	MTK_VENDOR_ATTR_CSI_CTRL_DATA,
++
++	/* keep last */
++	NUM_MTK_VENDOR_ATTRS_CSI_CTRL,
++	MTK_VENDOR_ATTR_CSI_CTRL_MAX =
++		NUM_MTK_VENDOR_ATTRS_CSI_CTRL - 1
++};
++
++enum mtk_vendor_attr_csi_data {
++	MTK_VENDOR_ATTR_CSI_DATA_UNSPEC,
++	MTK_VENDOR_ATTR_CSI_DATA_PAD,
++
++	MTK_VENDOR_ATTR_CSI_DATA_VER,
++	MTK_VENDOR_ATTR_CSI_DATA_TS,
++	MTK_VENDOR_ATTR_CSI_DATA_RSSI,
++	MTK_VENDOR_ATTR_CSI_DATA_SNR,
++	MTK_VENDOR_ATTR_CSI_DATA_BW,
++	MTK_VENDOR_ATTR_CSI_DATA_CH_IDX,
++	MTK_VENDOR_ATTR_CSI_DATA_TA,
++	MTK_VENDOR_ATTR_CSI_DATA_I,
++	MTK_VENDOR_ATTR_CSI_DATA_Q,
++	MTK_VENDOR_ATTR_CSI_DATA_INFO,
++	MTK_VENDOR_ATTR_CSI_DATA_RSVD1,
++	MTK_VENDOR_ATTR_CSI_DATA_RSVD2,
++	MTK_VENDOR_ATTR_CSI_DATA_RSVD3,
++	MTK_VENDOR_ATTR_CSI_DATA_RSVD4,
++	MTK_VENDOR_ATTR_CSI_DATA_TX_ANT,
++	MTK_VENDOR_ATTR_CSI_DATA_RX_ANT,
++	MTK_VENDOR_ATTR_CSI_DATA_MODE,
++	MTK_VENDOR_ATTR_CSI_DATA_H_IDX,
++
++	/* ABI v2: append only; attributes 0..19 stay byte-for-byte stable. */
++	MTK_VENDOR_ATTR_CSI_DATA_CH_BW,
++	MTK_VENDOR_ATTR_CSI_DATA_NUM,
++	MTK_VENDOR_ATTR_CSI_DATA_PKT_SN,
++	MTK_VENDOR_ATTR_CSI_DATA_SEGMENT_NUM,
++	MTK_VENDOR_ATTR_CSI_DATA_REMAIN_LAST,
++	MTK_VENDOR_ATTR_CSI_DATA_TR_STREAM,
++	MTK_VENDOR_ATTR_CSI_DATA_CHAIN_INFO,
++	MTK_VENDOR_ATTR_CSI_DATA_BAND,
++
++	/* keep last */
++	NUM_MTK_VENDOR_ATTRS_CSI_DATA,
++	MTK_VENDOR_ATTR_CSI_DATA_MAX =
++		NUM_MTK_VENDOR_ATTRS_CSI_DATA - 1
++};
++
++#endif

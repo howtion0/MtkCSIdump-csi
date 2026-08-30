@@ -13,6 +13,17 @@ algorithms need.
 > angle. Direction and range require antenna calibration, packet pairing, a
 > stable transmitter, and algorithms built on top of this data.
 
+## Progressive GitHub lines
+
+| Branch | Deliverable | Safety state |
+|---|---|---|
+| `codex/stage-1-capture` | Portable CSI2 capture, parser and GUI | Hardware-free tests passed |
+| `codex/stage-2-driver` | [Hardened MT7915 CSI patch and frozen ABI](driver/mt7915-csi/README.md) | Source/ABI gate only; not loaded on a router |
+
+Each line is usable as an audit checkpoint. A green source test does not imply
+that a module or firmware image is safe to deploy; deployment has separate
+kernel ABI, flash-layout, Ethernet and rollback gates.
+
 ## What is fixed in Stage 1
 
 - **No more fixed 61-point output.** Legacy Nullcon `mt76` reports omit
