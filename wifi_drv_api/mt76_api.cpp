@@ -1,45 +1,38 @@
-// #define _GNU_SOURCE
 #include "mt76_api.h"
 
-#include <errno.h>
-#include <linux/nl80211.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <cstring>
+#include <new>
 #include <vector>
 
-#ifdef __cplusplus
+#include <linux/nl80211.h>
+
 extern "C"
 {
-#endif
 #include <netlink/attr.h>
+#include <netlink/msg.h>
 #include <unl.h>
-#ifdef __cplusplus
 }
-#endif
 
 #include <net/if.h>
-#include <unistd.h>
 
-#define MTK_NL80211_VENDOR_ID 0x0ce7
-#define CSI_DUMP_PER_NUM 3
-#define CSI_MAX_COUNT 256
-
-static struct unl unl;
-enum mtk_nl80211_vendor_subcmds
+namespace
 {
-    MTK_NL80211_VENDOR_SUBCMD_AMNT_CTRL = 0xae,
+constexpr u32 MTK_NL80211_VENDOR_ID = 0x0ce7;
+constexpr int CSI_DUMP_PER_REQUEST = 3;
+constexpr int CSI_MAX_DUMP_PACKETS = 30000;
+
+enum MtkNl80211VendorSubcmds
+{
     MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL = 0xc2,
-    MTK_NL80211_VENDOR_SUBCMD_RFEATURE_CTRL = 0xc3,
-    MTK_NL80211_VENDOR_SUBCMD_WIRELESS_CTRL = 0xc4,
-    MTK_NL80211_VENDOR_SUBCMD_MU_CTRL = 0xc5,
-    MTK_NL80211_VENDOR_SUBCMD_PHY_CAPA_CTRL = 0xc6,
 };
 
-enum mtk_vendor_attr_csi_ctrl
+enum MtkVendorAttrCsiCtrl
 {
     MTK_VENDOR_ATTR_CSI_CTRL_UNSPEC,
-
     MTK_VENDOR_ATTR_CSI_CTRL_CFG,
     MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE,
     MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE,
@@ -47,22 +40,19 @@ enum mtk_vendor_attr_csi_ctrl
     MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2,
     MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR,
     MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL,
-
     MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM,
-
     MTK_VENDOR_ATTR_CSI_CTRL_DATA,
-
-    /* keep last */
     NUM_MTK_VENDOR_ATTRS_CSI_CTRL,
-    MTK_VENDOR_ATTR_CSI_CTRL_MAX =
-        NUM_MTK_VENDOR_ATTRS_CSI_CTRL - 1
+    MTK_VENDOR_ATTR_CSI_CTRL_MAX = NUM_MTK_VENDOR_ATTRS_CSI_CTRL - 1,
 };
 
-enum mtk_vendor_attr_csi_data
+// Attributes 2..8 are shared by the Nullcon ABI and MediaTek's extended ABI.
+// Starting at attribute 9, the extended ABI inserts DATA_NUM and shifts the
+// remaining fields by one.
+enum MtkVendorAttrCsiDataCommon
 {
     MTK_VENDOR_ATTR_CSI_DATA_UNSPEC,
     MTK_VENDOR_ATTR_CSI_DATA_PAD,
-
     MTK_VENDOR_ATTR_CSI_DATA_VER,
     MTK_VENDOR_ATTR_CSI_DATA_TS,
     MTK_VENDOR_ATTR_CSI_DATA_RSSI,
@@ -70,350 +60,522 @@ enum mtk_vendor_attr_csi_data
     MTK_VENDOR_ATTR_CSI_DATA_BW,
     MTK_VENDOR_ATTR_CSI_DATA_CH_IDX,
     MTK_VENDOR_ATTR_CSI_DATA_TA,
-    MTK_VENDOR_ATTR_CSI_DATA_I,
-    MTK_VENDOR_ATTR_CSI_DATA_Q,
-    MTK_VENDOR_ATTR_CSI_DATA_INFO,
-    MTK_VENDOR_ATTR_CSI_DATA_RSVD1,
-    MTK_VENDOR_ATTR_CSI_DATA_RSVD2,
-    MTK_VENDOR_ATTR_CSI_DATA_RSVD3,
-    MTK_VENDOR_ATTR_CSI_DATA_RSVD4,
-    MTK_VENDOR_ATTR_CSI_DATA_TX_ANT,
-    MTK_VENDOR_ATTR_CSI_DATA_RX_ANT,
-    MTK_VENDOR_ATTR_CSI_DATA_MODE,
-    MTK_VENDOR_ATTR_CSI_DATA_H_IDX,
-
-    /* keep last */
-    NUM_MTK_VENDOR_ATTRS_CSI_DATA,
-    MTK_VENDOR_ATTR_CSI_DATA_MAX =
-            NUM_MTK_VENDOR_ATTRS_CSI_DATA - 1
 };
 
+constexpr int SIMPLE_DATA_I = 9;
+constexpr int SIMPLE_DATA_Q = 10;
+constexpr int SIMPLE_DATA_INFO = 11;
+constexpr int SIMPLE_DATA_TX_ANT = 16;
+constexpr int SIMPLE_DATA_RX_ANT = 17;
+constexpr int SIMPLE_DATA_MODE = 18;
+constexpr int SIMPLE_DATA_H_IDX = 19;
 
-static struct nla_policy csi_ctrl_policy[NUM_MTK_VENDOR_ATTRS_CSI_CTRL];
-static struct nla_policy csi_data_policy[NUM_MTK_VENDOR_ATTRS_CSI_DATA];
-static std::vector<csi_data *> csi_list;
+constexpr int EXTENDED_DATA_NUM = 9;
+constexpr int EXTENDED_DATA_I = 10;
+constexpr int EXTENDED_DATA_Q = 11;
+constexpr int EXTENDED_DATA_INFO = 12;
+constexpr int EXTENDED_DATA_TX_ANT = 17;
+constexpr int EXTENDED_DATA_RX_ANT = 18;
+constexpr int EXTENDED_DATA_MODE = 19;
+constexpr int EXTENDED_DATA_CHAIN_INFO = 20;
+
+// Stage-2 ABI additions preserve every Nullcon ID and append new metadata.
+constexpr int STAGE2_DATA_CH_BW = 20;
+constexpr int STAGE2_DATA_NUM = 21;
+constexpr int STAGE2_DATA_PKT_SN = 22;
+constexpr int STAGE2_DATA_SEGMENT_NUM = 23;
+constexpr int STAGE2_DATA_REMAIN_LAST = 24;
+constexpr int STAGE2_DATA_TR_STREAM = 25;
+constexpr int STAGE2_DATA_CHAIN_INFO = 26;
+constexpr int STAGE2_DATA_BAND = 27;
+constexpr int MAX_CSI_DATA_ATTR = STAGE2_DATA_BAND;
+
+struct DumpContext
+{
+    struct unl *netlink;
+    std::vector<csi_data *> *output;
+    bool parse_failed = false;
+};
+
+void clear_csi_list(std::vector<csi_data *> &list)
+{
+    for (csi_data *entry : list)
+        delete entry;
+    list.clear();
+}
+
+bool attr_u8(struct nlattr *attr, u8 &value)
+{
+    if (!attr || nla_len(attr) != static_cast<int>(sizeof(u8)))
+        return false;
+    value = nla_get_u8(attr);
+    return true;
+}
+
+bool attr_u16(struct nlattr *attr, u16 &value)
+{
+    if (!attr || nla_len(attr) != static_cast<int>(sizeof(u16)))
+        return false;
+    value = nla_get_u16(attr);
+    return true;
+}
+
+bool attr_u32(struct nlattr *attr, u32 &value)
+{
+    if (!attr || nla_len(attr) != static_cast<int>(sizeof(u32)))
+        return false;
+    value = nla_get_u32(attr);
+    return true;
+}
+
+template <size_t N>
+bool read_nested_u8(struct nlattr *attr, std::array<u8, N> &values)
+{
+    if (!attr)
+        return false;
+
+    struct nlattr *current;
+    int remaining;
+    std::vector<size_t> indices;
+    nla_for_each_nested(current, attr, remaining)
+    {
+        const size_t index = static_cast<size_t>(nla_type(current));
+        if (nla_len(current) != static_cast<int>(sizeof(u8)) || index >= N)
+            return false;
+        values[index] = nla_get_u8(current);
+        indices.push_back(index);
+    }
+    size_t dense_count = 0;
+    return csi_validate_dense_indices(indices, N, dense_count) &&
+           dense_count == N;
+}
+
+template <size_t N>
+bool read_nested_s16(struct nlattr *attr, std::array<s16, N> &values,
+                     size_t &count)
+{
+    if (!attr)
+        return false;
+
+    struct nlattr *current;
+    int remaining;
+    std::vector<size_t> indices;
+    nla_for_each_nested(current, attr, remaining)
+    {
+        const size_t index = static_cast<size_t>(nla_type(current));
+        if (nla_len(current) != static_cast<int>(sizeof(u16)) || index >= N)
+            return false;
+        values[index] = static_cast<s16>(nla_get_u16(current));
+        indices.push_back(index);
+    }
+
+    return csi_validate_dense_indices(indices, N, count);
+}
+
+bool parse_csi_data(struct nlattr *nested, csi_data &csi)
+{
+    struct nlattr *attrs[MAX_CSI_DATA_ATTR + 1] = {};
+    if (nla_parse_nested(attrs, MAX_CSI_DATA_ATTR, nested, nullptr) < 0)
+        return false;
+
+    u8 raw_rssi = 0;
+    if (!attr_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_VER], csi.version) ||
+        !attr_u32(attrs[MTK_VENDOR_ATTR_CSI_DATA_TS], csi.ts) ||
+        !attr_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_RSSI], raw_rssi) ||
+        !attr_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_SNR], csi.snr) ||
+        !attr_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_BW], csi.data_bw) ||
+        !attr_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_CH_IDX], csi.pri_ch_idx) ||
+        !read_nested_u8(attrs[MTK_VENDOR_ATTR_CSI_DATA_TA], csi.ta))
+        return false;
+
+    csi.rssi = static_cast<s8>(raw_rssi);
+
+    const bool extended_abi =
+        attrs[EXTENDED_DATA_NUM] &&
+        nla_len(attrs[EXTENDED_DATA_NUM]) == static_cast<int>(sizeof(u32));
+
+    const int i_attr = extended_abi ? EXTENDED_DATA_I : SIMPLE_DATA_I;
+    const int q_attr = extended_abi ? EXTENDED_DATA_Q : SIMPLE_DATA_Q;
+    const int info_attr = extended_abi ? EXTENDED_DATA_INFO : SIMPLE_DATA_INFO;
+    const int tx_attr = extended_abi ? EXTENDED_DATA_TX_ANT : SIMPLE_DATA_TX_ANT;
+    const int rx_attr = extended_abi ? EXTENDED_DATA_RX_ANT : SIMPLE_DATA_RX_ANT;
+    const int mode_attr = extended_abi ? EXTENDED_DATA_MODE : SIMPLE_DATA_MODE;
+
+    if (!attr_u32(attrs[info_attr], csi.ext_info) ||
+        !attr_u16(attrs[tx_attr], csi.tx_idx) ||
+        !attr_u16(attrs[rx_attr], csi.rx_idx) ||
+        !attr_u8(attrs[mode_attr], csi.rx_mode))
+        return false;
+    csi.presence_flags |= CSI_PRESENT_RX_MODE;
+
+    bool truncated = false;
+    size_t i_count = 0;
+    size_t q_count = 0;
+    if (!read_nested_s16(attrs[i_attr], csi.data_i, i_count) ||
+        !read_nested_s16(attrs[q_attr], csi.data_q, q_count))
+        return false;
+
+    if (i_count != q_count)
+        return false;
+
+    if (!extended_abi && attrs[STAGE2_DATA_CH_BW])
+    {
+        if (!attr_u8(attrs[STAGE2_DATA_CH_BW], csi.ch_bw))
+            return false;
+    }
+    else
+    {
+        // Legacy ABIs do not export receiver channel width. Use the per-packet
+        // data width and mark it as inferred instead of silently reporting 20.
+        csi.ch_bw = csi.data_bw;
+        csi.metadata_flags |= CSI_META_CH_BW_INFERRED;
+    }
+
+    if (extended_abi)
+    {
+        u32 explicit_count = 0;
+        if (!attr_u32(attrs[EXTENDED_DATA_NUM], explicit_count) ||
+            explicit_count == 0 || explicit_count > i_count ||
+            explicit_count > csi.data_i.size())
+            return false;
+
+        csi.data_num = static_cast<u16>(explicit_count);
+        csi.metadata_flags |= CSI_META_EXTENDED_ABI;
+        if (!attr_u32(attrs[EXTENDED_DATA_CHAIN_INFO], csi.chain_info))
+            return false;
+        csi.presence_flags |= CSI_PRESENT_CHAIN_INFO;
+    }
+    else
+    {
+        if (attrs[STAGE2_DATA_NUM])
+        {
+            u32 explicit_count = 0;
+            if (!attr_u32(attrs[STAGE2_DATA_NUM], explicit_count) ||
+                explicit_count == 0 || explicit_count > i_count ||
+                explicit_count > csi.data_i.size())
+                return false;
+            csi.data_num = static_cast<u16>(explicit_count);
+        }
+        else
+        {
+            // Nullcon always serializes all 256 storage slots and does not
+            // export firmware data_num. Infer the FFT span from BW. This fixes
+            // the old always-61-point output at 40/80 MHz.
+            const size_t expected = csi_fft_count_for_bandwidth(csi.data_bw);
+            const size_t inferred = std::min(expected, i_count);
+            if (inferred == 0)
+                return false;
+            csi.data_num = static_cast<u16>(inferred);
+            csi.metadata_flags |= CSI_META_DATA_NUM_INFERRED;
+            if (expected > i_count)
+                truncated = true;
+        }
+
+        if (!attr_u32(attrs[SIMPLE_DATA_H_IDX], csi.h_idx))
+            return false;
+        csi.presence_flags |= CSI_PRESENT_H_IDX;
+
+        if (attrs[STAGE2_DATA_PKT_SN])
+        {
+            if (!attr_u16(attrs[STAGE2_DATA_PKT_SN], csi.pkt_sn))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_PKT_SN;
+        }
+        if (attrs[STAGE2_DATA_SEGMENT_NUM])
+        {
+            if (!attr_u32(attrs[STAGE2_DATA_SEGMENT_NUM], csi.segment_num))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_SEGMENT_NUM;
+        }
+        if (attrs[STAGE2_DATA_REMAIN_LAST])
+        {
+            if (!attr_u8(attrs[STAGE2_DATA_REMAIN_LAST], csi.remain_last))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_REMAIN_LAST;
+        }
+        if (attrs[STAGE2_DATA_TR_STREAM])
+        {
+            if (!attr_u8(attrs[STAGE2_DATA_TR_STREAM], csi.tr_stream))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_TR_STREAM;
+        }
+        if (attrs[STAGE2_DATA_CHAIN_INFO])
+        {
+            if (!attr_u32(attrs[STAGE2_DATA_CHAIN_INFO], csi.chain_info))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_CHAIN_INFO;
+        }
+        if (attrs[STAGE2_DATA_BAND])
+        {
+            if (!attr_u8(attrs[STAGE2_DATA_BAND], csi.band))
+                return false;
+            csi.presence_flags |= CSI_PRESENT_BAND;
+        }
+    }
+
+    if (truncated)
+        csi.metadata_flags |= CSI_META_TRUNCATED;
+
+    return true;
+}
+} // namespace
+
 class MT76APIPrivate
 {
 public:
-    MT76APIPrivate()
-    {
-//        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_BAND_IDX].type = NLA_U8;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_CFG].type = NLA_NESTED;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE].type = NLA_U8;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE].type = NLA_U8;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1].type = NLA_U8;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2].type = NLA_U8;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_MAC_ADDR].type = NLA_NESTED;
-//        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_INTERVAL].type = NLA_U32;
-//        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_STA_INTERVAL].type = NLA_U32;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM].type = NLA_U16;
-        csi_ctrl_policy[MTK_VENDOR_ATTR_CSI_CTRL_DATA].type = NLA_NESTED;
-
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_VER].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_TS].type = NLA_U32;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_RSSI].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_SNR].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_BW].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_CH_IDX].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_TA].type = NLA_NESTED;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_I].type = NLA_NESTED;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_Q].type = NLA_NESTED;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_INFO].type = NLA_U32;
-
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_MODE].type = NLA_U8;
-        csi_data_policy[MTK_VENDOR_ATTR_CSI_DATA_H_IDX].type = NLA_U32;
-    }
     ~MT76APIPrivate()
     {
-        if (!csi_list.empty())
-        {
-            for (auto it : csi_list)
-                delete it;
-            csi_list.clear();
-        }
+        clear_csi_list(csi_list);
     }
 
-    static int md_csi_dump_cb(struct nl_msg *msg, void *arg)
+    static int csi_dump_callback(struct nl_msg *msg, void *arg)
     {
-        nlattr *tb[NUM_MTK_VENDOR_ATTRS_CSI_CTRL];
-        nlattr *tb_data[NUM_MTK_VENDOR_ATTRS_CSI_DATA];
-        nlattr *attr;
-        nlattr *cur;
-        size_t idx;
-        int rem;
-        csi_data *c;
+        auto *context = static_cast<DumpContext *>(arg);
+        if (!context || !context->netlink || !context->output)
+            return NL_SKIP;
 
-        attr = unl_find_attr(&unl, msg, NL80211_ATTR_VENDOR_DATA);
-        if (!attr)
+        struct nlattr *vendor_data =
+            unl_find_attr(context->netlink, msg, NL80211_ATTR_VENDOR_DATA);
+        if (!vendor_data)
         {
-            fprintf(stderr, "Testdata attribute not found\n");
+            std::fprintf(stderr, "CSI reply has no vendor-data attribute\n");
+            context->parse_failed = true;
             return NL_SKIP;
         }
 
-        nla_parse_nested(tb, MTK_VENDOR_ATTR_CSI_CTRL_MAX,
-                 attr, csi_ctrl_policy);
-
-        if (!tb[MTK_VENDOR_ATTR_CSI_CTRL_DATA])
-            return NL_SKIP;
-
-        nla_parse_nested(tb_data, MTK_VENDOR_ATTR_CSI_DATA_MAX,
-                 tb[MTK_VENDOR_ATTR_CSI_CTRL_DATA], csi_data_policy);
-
-        if (!(tb_data[MTK_VENDOR_ATTR_CSI_DATA_VER] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_TS] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_RSSI] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_SNR] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_BW] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_CH_IDX] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_TA] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_I] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_Q] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_INFO] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_MODE] &&
-              tb_data[MTK_VENDOR_ATTR_CSI_DATA_H_IDX]))
+        struct nlattr *ctrl_attrs[NUM_MTK_VENDOR_ATTRS_CSI_CTRL] = {};
+        if (nla_parse_nested(ctrl_attrs, MTK_VENDOR_ATTR_CSI_CTRL_MAX,
+                             vendor_data, nullptr) < 0 ||
+            !ctrl_attrs[MTK_VENDOR_ATTR_CSI_CTRL_DATA])
         {
-            fprintf(stderr, "Attributes error for CSI data\n");
+            std::fprintf(stderr, "CSI reply has malformed control attributes\n");
+            context->parse_failed = true;
             return NL_SKIP;
         }
 
-        c = new csi_data();
-        if (!c)
-            return -ENOMEM;
-
-        c->rssi = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_RSSI]);
-        c->snr = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_SNR]);
-        c->data_bw = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_BW]);
-        c->pri_ch_idx = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_CH_IDX]);
-        c->rx_mode = nla_get_u8(tb_data[MTK_VENDOR_ATTR_CSI_DATA_MODE]);
-
-        c->tx_idx = nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TX_ANT]);
-        c->rx_idx = nla_get_u16(tb_data[MTK_VENDOR_ATTR_CSI_DATA_RX_ANT]);
-
-        c->ext_info = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_INFO]);
-        c->h_idx = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_H_IDX]);
-
-        c->ts = nla_get_u32(tb_data[MTK_VENDOR_ATTR_CSI_DATA_TS]);
-
-        idx = 0;
-        nla_for_each_nested(cur, tb_data[MTK_VENDOR_ATTR_CSI_DATA_TA], rem)
+        auto *entry = new (std::nothrow) csi_data();
+        if (!entry)
         {
-            if (idx < ETH_ALEN)
-                c->ta[idx++] = nla_get_u8(cur);
+            context->parse_failed = true;
+            return NL_SKIP;
         }
 
-        idx = 0;
-        nla_for_each_nested(cur, tb_data[MTK_VENDOR_ATTR_CSI_DATA_I], rem)
+        if (!parse_csi_data(ctrl_attrs[MTK_VENDOR_ATTR_CSI_CTRL_DATA], *entry))
         {
-            if (idx < CSI_MAX_COUNT)
-                c->data_i[idx++] = nla_get_u16(cur);
+            std::fprintf(stderr, "CSI reply has missing or malformed data attributes\n");
+            context->parse_failed = true;
+            delete entry;
+            return NL_SKIP;
         }
 
-        idx = 0;
-        nla_for_each_nested(cur, tb_data[MTK_VENDOR_ATTR_CSI_DATA_Q], rem)
-        {
-            if (idx < CSI_MAX_COUNT)
-                c->data_q[idx++] = nla_get_u16(cur);
-        }
+        entry->host_timestamp_ns = static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count());
 
-        csi_list.push_back(c);
-
+        context->output->push_back(entry);
         return NL_SKIP;
     }
 
-    std::vector<csi_data *> *motion_detection_dump(const char *wifi, int pkt_num)
+    std::vector<csi_data *> *motion_detection_dump(const char *wifi, int packet_count)
     {
-        int ret = 0, i;
-        struct nl_msg *msg;
-        nlattr *data;
-        int band, if_idx;
-
-        if_idx = if_nametoindex(wifi);
-        if (!if_idx)
+        if (!wifi || packet_count < 0 || packet_count > CSI_MAX_DUMP_PACKETS)
         {
-            fprintf(stderr, "%s\n", strerror(errno));
-            return NULL;
+            errno = EINVAL;
+            return nullptr;
         }
 
-        band = strtoul(wifi + (strlen(wifi) - 1), NULL, 0);
-
-        if (!csi_list.empty())
+        const unsigned if_index = if_nametoindex(wifi);
+        if (!if_index)
         {
-            for (auto it : csi_list)
-                delete it;
-            csi_list.clear();
+            std::fprintf(stderr, "Unknown Wi-Fi interface '%s': %s\n", wifi,
+                         std::strerror(errno));
+            return nullptr;
         }
 
-        for (i = 0; i < pkt_num / CSI_DUMP_PER_NUM; i++)
+        clear_csi_list(csi_list);
+        int remaining = packet_count;
+        while (remaining > 0)
         {
-            if (unl_genl_init(&unl, "nl80211") < 0)
+            struct unl netlink = {};
+            if (unl_genl_init(&netlink, "nl80211") < 0)
             {
-                fprintf(stderr, "Failed to connect to nl80211\n");
-                return NULL;
+                std::fprintf(stderr, "Failed to connect to nl80211\n");
+                clear_csi_list(csi_list);
+                return nullptr;
             }
 
-            msg = unl_genl_msg(&unl, NL80211_CMD_VENDOR, true);
+            struct nl_msg *msg = unl_genl_msg(&netlink, NL80211_CMD_VENDOR, true);
+            if (!msg)
+            {
+                unl_free(&netlink);
+                clear_csi_list(csi_list);
+                return nullptr;
+            }
 
-            if (nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_idx) ||
+            const u16 request_count = static_cast<u16>(
+                std::min(remaining, CSI_DUMP_PER_REQUEST));
+            if (nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_index) ||
                 nla_put_u32(msg, NL80211_ATTR_VENDOR_ID, MTK_NL80211_VENDOR_ID) ||
-                nla_put_u32(msg, NL80211_ATTR_VENDOR_SUBCMD, MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL))
-                return NULL;
+                nla_put_u32(msg, NL80211_ATTR_VENDOR_SUBCMD,
+                            MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL))
+            {
+                nlmsg_free(msg);
+                unl_free(&netlink);
+                clear_csi_list(csi_list);
+                return nullptr;
+            }
 
-            data = nla_nest_start(msg, NL80211_ATTR_VENDOR_DATA | NLA_F_NESTED);
-            if (!data)
-                return NULL;
-
-            if (nla_put_u16(msg, MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM, CSI_DUMP_PER_NUM))
-                return NULL;
-
-            //nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_BAND_IDX, band);
-
+            struct nlattr *data =
+                nla_nest_start(msg, NL80211_ATTR_VENDOR_DATA | NLA_F_NESTED);
+            if (!data ||
+                nla_put_u16(msg, MTK_VENDOR_ATTR_CSI_CTRL_DUMP_NUM, request_count))
+            {
+                nlmsg_free(msg);
+                unl_free(&netlink);
+                clear_csi_list(csi_list);
+                return nullptr;
+            }
             nla_nest_end(msg, data);
 
-            if (unl_genl_request(&unl, msg, md_csi_dump_cb, NULL))
-                fprintf(stderr, "nl80211 call failed: %s\n", strerror(-ret));
+            DumpContext context{&netlink, &csi_list, false};
+            const int ret = unl_genl_request(&netlink, msg, csi_dump_callback,
+                                             &context);
+            unl_free(&netlink);
+            if (ret < 0 || context.parse_failed)
+            {
+                if (ret < 0)
+                    std::fprintf(stderr, "nl80211 CSI dump failed: %s\n",
+                                 std::strerror(-ret));
+                else
+                    std::fprintf(stderr,
+                                 "Discarding CSI batch after malformed reply\n");
+                clear_csi_list(csi_list);
+                return nullptr;
+            }
 
-            unl_free(&unl);
+            remaining -= request_count;
         }
 
         return &csi_list;
     }
 
-    int md_csi_set_attr(int band, struct nl_msg *msg, u8 mode, u8 type, u8 v1, u32 v2)
+    static int add_csi_config(struct nl_msg *msg, u8 mode, u8 type,
+                              u8 value1, u32 value2)
     {
-        nlattr *data;
-        u8 a[ETH_ALEN];
-        int matches, i;
+        struct nlattr *config =
+            nla_nest_start(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG | NLA_F_NESTED);
+        if (!config)
+            return -EMSGSIZE;
 
-        data = nla_nest_start(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG | NLA_F_NESTED);
-        if (!data)
-            return -ENOMEM;
+        if (nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE, mode) ||
+            nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE, type) ||
+            nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1, value1) ||
+            nla_put_u32(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2, value2))
+        {
+            return -EMSGSIZE;
+        }
 
-        nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_MODE, mode);
-        nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_TYPE, type);
-        nla_put_u8(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL1, v1);
-        nla_put_u32(msg, MTK_VENDOR_ATTR_CSI_CTRL_CFG_VAL2, v2);
-
-        nla_nest_end(msg, data);
-
+        nla_nest_end(msg, config);
         return 0;
     }
 
-    int md_csi_set(int band, int idx, u8 mode, u8 type, u8 v1, u32 v2)
+    static int set_csi(unsigned if_index, u8 mode, u8 type,
+                       u8 value1, u32 value2)
     {
-        struct nl_msg *msg;
-        nlattr *data;
-        int ret;
+        struct unl netlink = {};
+        if (unl_genl_init(&netlink, "nl80211") < 0)
+            return -ENOLINK;
 
-        fprintf(stderr, "enter md_csi_set()\n");
-
-        if (unl_genl_init(&unl, "nl80211") < 0)
+        struct nl_msg *msg = unl_genl_msg(&netlink, NL80211_CMD_VENDOR, false);
+        if (!msg)
         {
-            fprintf(stderr, "Failed to connect to nl80211\n");
-            return 2;
+            unl_free(&netlink);
+            return -ENOMEM;
         }
 
-        msg = unl_genl_msg(&unl, NL80211_CMD_VENDOR, false);
-
-        if (nla_put_u32(msg, NL80211_ATTR_IFINDEX, idx) ||
+        if (nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_index) ||
             nla_put_u32(msg, NL80211_ATTR_VENDOR_ID, MTK_NL80211_VENDOR_ID) ||
-            nla_put_u32(msg, NL80211_ATTR_VENDOR_SUBCMD, MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL))
-            return false;
+            nla_put_u32(msg, NL80211_ATTR_VENDOR_SUBCMD,
+                        MTK_NL80211_VENDOR_SUBCMD_CSI_CTRL))
+        {
+            nlmsg_free(msg);
+            unl_free(&netlink);
+            return -EMSGSIZE;
+        }
 
-        data = nla_nest_start(msg, NL80211_ATTR_VENDOR_DATA | NLA_F_NESTED);
+        struct nlattr *data =
+            nla_nest_start(msg, NL80211_ATTR_VENDOR_DATA | NLA_F_NESTED);
         if (!data)
-            return -ENOMEM;
+        {
+            nlmsg_free(msg);
+            unl_free(&netlink);
+            return -EMSGSIZE;
+        }
 
-        md_csi_set_attr(band, msg, mode, type, v1, v2);
-
+        const int config_ret = add_csi_config(msg, mode, type, value1, value2);
+        if (config_ret < 0)
+        {
+            nlmsg_free(msg);
+            unl_free(&netlink);
+            return config_ret;
+        }
         nla_nest_end(msg, data);
 
-        ret = unl_genl_request(&unl, msg, NULL, NULL);
-        if (ret)  {
-            fprintf(stderr, "nl80211 call failed: %s\n", strerror(-ret));
-        }
-
-        unl_free(&unl);
-
+        const int ret = unl_genl_request(&netlink, msg, nullptr, nullptr);
+        unl_free(&netlink);
+        if (ret < 0)
+            std::fprintf(stderr, "nl80211 CSI configuration failed: %s\n",
+                         std::strerror(-ret));
         return ret;
     }
 
     int motion_detection_start(const char *wifi)
     {
-        int band, if_idx;
-        int ret = 0;
+        if (!wifi)
+            return -EINVAL;
 
-        if_idx = if_nametoindex(wifi);
-        if (!if_idx)
-        {
-            fprintf(stderr, "%s\n", strerror(errno));
-            return 2;
-        }
+        const unsigned if_index = if_nametoindex(wifi);
+        if (!if_index)
+            return errno ? -errno : -ENODEV;
 
-        band = strtoul(wifi + (strlen(wifi) - 1), NULL, 0);
+        int ret = set_csi(if_index, 2, 3, 0, 34); // QoS data frames.
+        if (!ret)
+            ret = set_csi(if_index, 2, 9, 1, 0); // Firmware event output.
+        if (!ret)
+            ret = set_csi(if_index, 1, 0, 0, 0); // Start capture.
 
-        ret = md_csi_set(band, if_idx, 2, 3, 0, 34);
-        if (ret)
-        {
-            fprintf(stderr, "md start: md_csi_set (QoS data) failed: %s\n", strerror(-ret));
-            return ret;
-        }
-        ret = md_csi_set(band, if_idx, 2, 9, 1, 0);
-        if (ret)
-        {
-            fprintf(stderr, "md start: md_csi_set (data output by event) failed: %s\n", strerror(-ret));
-            return ret;
-        }
-
-        ret = md_csi_set(band, if_idx, 1, 0, 0, 0);
-        if (ret)
-        {
-            fprintf(stderr, "md start: md_csi_set (csi start) failed: %s\n", strerror(-ret));
-            return ret;
-        }
-
+        if (ret < 0)
+            (void)set_csi(if_index, 0, 0, 0, 0); // Best-effort rollback.
         return ret;
     }
 
     int motion_detection_stop(const char *wifi)
     {
-        int band, if_idx;
-        int ret = 0;
+        if (!wifi || !*wifi)
+            return 0;
 
-        if_idx = if_nametoindex(wifi);
-        if (!if_idx)
-        {
-            fprintf(stderr, "%s\n", strerror(errno));
-            return 2;
-        }
-
-        band = strtoul(wifi + (strlen(wifi) - 1), NULL, 0);
-
-        ret = md_csi_set(band, if_idx, 0, 0, 0, 0);
-        if (ret)
-        {
-            fprintf(stderr, "md stop: md_csi_set (csi stop) failed: %s\n", strerror(-ret));
-            return ret;
-        }
-
-        return ret;
+        const unsigned if_index = if_nametoindex(wifi);
+        if (!if_index)
+            return errno ? -errno : -ENODEV;
+        return set_csi(if_index, 0, 0, 0, 0);
     }
+
+private:
+    std::vector<csi_data *> csi_list;
 };
 
-MT76API::MT76API()
-{
-    d = new MT76APIPrivate();
-}
+MT76API::MT76API() : d(new MT76APIPrivate()) {}
 
 MT76API::~MT76API()
 {
     delete d;
 }
 
-std::vector<csi_data *> *MT76API::motion_detection_dump(const char *wifi, int pkt_num)
+std::vector<csi_data *> *MT76API::motion_detection_dump(const char *wifi,
+                                                         int packet_count)
 {
-    return d->motion_detection_dump(wifi, pkt_num);
+    return d->motion_detection_dump(wifi, packet_count);
 }
 
 int MT76API::motion_detection_start(const char *wifi)

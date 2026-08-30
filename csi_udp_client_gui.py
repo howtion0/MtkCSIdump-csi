@@ -2,35 +2,14 @@
 
 import sys
 import socket
-import struct
 import time
-import threading
 import signal
 from collections import deque
-from datetime import datetime
 import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
 
-# disclaimer: this is mostly AI slop
-
-# Struct format for CsiPacketHeader
-# uint64_t timestamp, uint32_t antenna_idx, uint32_t packet_count, uint32_t total_samples
-HEADER_FORMAT = '<QIII'  # Little endian: Q=uint64, I=uint32
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)
-
-# Struct format for CsiSample (I/Q pair)
-# double i, double q
-SAMPLE_FORMAT = '<dd'  # Little endian: d=double, d=double
-SAMPLE_SIZE = struct.calcsize(SAMPLE_FORMAT)
-
-class CSIData:
-    def __init__(self):
-        self.timestamp = 0
-        self.antenna_idx = 0
-        self.packet_count = 0
-        self.samples = []  # Now contains complex numbers (I+jQ)
-        self.addr = None
+from csi_protocol import ProtocolError, decode_datagram
 
 class CSIReceiver(QtCore.QObject):
     data_received = QtCore.pyqtSignal(object)
@@ -56,38 +35,16 @@ class CSIReceiver(QtCore.QObject):
                 try:
                     data, addr = self.socket.recvfrom(65536)
                     
-                    if len(data) < HEADER_SIZE:
-                        continue
-                    
-                    # Parse header
-                    timestamp, antenna_idx, packet_count, total_samples = struct.unpack(
-                        HEADER_FORMAT, data[:HEADER_SIZE])
-                    
-                    # Parse CSI samples (I/Q pairs)
-                    samples_data = data[HEADER_SIZE:]
-                    num_samples = len(samples_data) // SAMPLE_SIZE
-                    
-                    samples = []
-                    if num_samples > 0:
-                        # Unpack I/Q pairs and create complex numbers
-                        iq_values = list(struct.unpack(f'<{num_samples * 2}d', samples_data))
-                        for i in range(0, len(iq_values), 2):
-                            complex_sample = complex(iq_values[i], iq_values[i + 1])
-                            samples.append(complex_sample)
-                    
-                    # Create CSI data object
-                    csi_data = CSIData()
-                    csi_data.timestamp = timestamp
-                    csi_data.antenna_idx = antenna_idx
-                    csi_data.packet_count = packet_count
-                    csi_data.samples = samples
-                    csi_data.addr = addr
+                    csi_data = decode_datagram(data, addr)
                     
                     # Emit signal
                     self.data_received.emit(csi_data)
                     
                 except socket.timeout:
                     continue
+                except ProtocolError as e:
+                    if self.running:
+                        print(f"Discarded malformed CSI packet: {e}", file=sys.stderr)
                 except Exception as e:
                     if self.running:
                         print(f"Error receiving data: {e}", file=sys.stderr)
@@ -331,7 +288,8 @@ class CSIVisualizerWindow(QtWidgets.QMainWindow):
         if antenna_idx in self.plots:
             return
             
-        row = antenna_idx
+        # RX chain IDs are metadata, not guaranteed to be dense row numbers.
+        row = len(self.plots)
         
         # Magnitude plot (from complex CSI data)
         self.plots[antenna_idx] = self.plot_widget.addPlot(
@@ -398,7 +356,7 @@ class CSIVisualizerWindow(QtWidgets.QMainWindow):
         
         # Store data in history
         self.csi_data_history[antenna_idx].append(csi_data)
-        self.packet_counts[antenna_idx] = csi_data.packet_count
+        self.packet_counts[antenna_idx] = self.packet_counts.get(antenna_idx, 0) + 1
         
         # Update plots
         self.update_plots(antenna_idx, csi_data)
@@ -472,8 +430,6 @@ class CSIVisualizerWindow(QtWidgets.QMainWindow):
         
         # Convert to numpy array for display
         if len(self.waterfall_data[antenna_idx]) > 1:
-            waterfall_array = np.array(self.waterfall_data[antenna_idx])
-            
             # Ensure consistent array shape by padding shorter arrays with zeros
             max_length = max(len(row) for row in self.waterfall_data[antenna_idx])
             padded_data = []
@@ -532,15 +488,28 @@ class CSIVisualizerWindow(QtWidgets.QMainWindow):
             
             # Get sample count info from the most recent data
             sample_info = ""
+            latest_metadata = ""
             if self.csi_data_history:
                 for antenna_idx, history in self.csi_data_history.items():
                     if history:
                         latest_data = history[-1]
                         sample_count = len(latest_data.samples)
                         sample_info = f" | Samples per packet: {sample_count}"
+                        if latest_data.protocol_version == 2:
+                            ta = ":".join(f"{octet:02x}" for octet in latest_data.transmitter_address)
+                            bw_mhz = {0: 20, 1: 40, 2: 80, 3: 160, 4: 320}.get(
+                                latest_data.data_bandwidth, "?"
+                            )
+                            latest_metadata = (
+                                f" | Latest: RX {latest_data.antenna_idx}, TX {latest_data.tx_idx}, "
+                                f"{bw_mhz} MHz, RSSI {latest_data.rssi}, TA {ta}"
+                            )
                         break
             
-            info_text = f"Active Antennas: {active_antennas} | Total Packets: {total_packets} | FPS: {self.fps:.1f}{sample_info}"
+            info_text = (
+                f"Active RX chains: {active_antennas} | Received: {total_packets} | "
+                f"FPS: {self.fps:.1f}{sample_info}{latest_metadata}"
+            )
             
             # Check if widgets still exist before updating
             if hasattr(self, 'info_label') and self.info_label is not None:

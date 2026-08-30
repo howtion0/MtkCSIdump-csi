@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <thread>
 #include <mutex>
@@ -9,23 +10,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <vector>
-#include <mutex>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
+#include "parsers/parser.h"
 #include "wifi_drv_api/mt76_api.h"
-
-struct CsiPacketHeader {
-    uint64_t timestamp;
-    uint32_t antenna_idx;
-    uint32_t packet_count;
-    uint32_t total_samples;
-} __attribute__((packed));
-
-struct CsiSample {
-    double i;  // In-phase component
-    double q;  // Quadrature component
-} __attribute__((packed));
 
 class MotionDetector
 {
@@ -50,11 +37,12 @@ public:
 private:
     void runMonitoring();
     void udpServerListen();
-    void sendCsiDataUdp(const std::vector<std::vector<double>>& data, int antennaIdx);
+    void sendCsiDataUdp(const CsiPacket& packet);
 
     static MotionDetector* instance;
-    MotionDetector() : isMonitoring(false), stopFlag(false), antMonIdx(0), motion_result(0.0),
-                       interval(0), udpServerRunning(false), udpSocket(-1) {}
+    MotionDetector() : interval(0), antMonIdx(0), stopFlag(false),
+                       motion_result(0.0), isMonitoring(false),
+                       udpSocket(-1), udpServerRunning(false), sequence(0) {}
 
     std::string ifname;
     unsigned interval;
@@ -64,12 +52,13 @@ private:
     MT76API wifi;
 
     double motion_result;
-    bool isMonitoring;
+    std::atomic<bool> isMonitoring;
     std::thread monitorWorker;
     std::thread udpServerWorker;
     std::mutex dataMutex;
     std::mutex udpMutex;
     std::vector<std::pair<std::string, int>> udpClients;
     int udpSocket;
-    bool udpServerRunning;
+    std::atomic<bool> udpServerRunning;
+    std::atomic<uint32_t> sequence;
 };

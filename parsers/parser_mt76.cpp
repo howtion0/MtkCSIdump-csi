@@ -2,66 +2,65 @@
 
 #include "wifi_drv_api/mt76_api.h"
 
-#include <vector>
+#include <chrono>
+#include <utility>
 
-#define CSI_MAX_COUNT 256
-
-//TODO rewrite, there is no "data_num"
-std::vector<std::vector<double>> ParserMT76::processRawData(void *data, int antIdx)
+std::vector<CsiPacket> ParserMT76::processRawData(void *data)
 {
-    std::vector<std::vector<std::complex<double>>> csi_per_antenna(ANTENNA_NUM, std::vector<std::complex<double>>(CSI_BW160_DATA_COUNT));
-    std::vector<csi_data *> *list = (std::vector<csi_data *>*)data;
-    std::vector<std::vector<double>> tones_per_packet[ANTENNA_NUM];
+    std::vector<CsiPacket> packets;
+    if (!data)
+        return packets;
 
-    for (int it = 0; it < list->size(); it++)
+    const auto *list = static_cast<const std::vector<csi_data *> *>(data);
+    packets.reserve(list->size());
+
+    for (const csi_data *raw : *list)
     {
-        int num_subcarriers = CSI_BW20_DATA_COUNT; // Default value
-        
-        csi_data *csi = list->at(it);
-        if (csi)
-        {
-            //fprintf(stderr, "\tprocessRawData() csi->data_num: %d\n", csi->data_num);
-            
-            // Determine number of subcarriers based on bandwidth
-            switch (csi->ch_bw) {
-                case 0: num_subcarriers = CSI_BW20_DATA_COUNT; break;   // 20MHz
-                case 1: num_subcarriers = CSI_BW40_DATA_COUNT; break;   // 40MHz
-                case 2: num_subcarriers = CSI_BW80_DATA_COUNT; break;   // 80MHz
-                case 3: num_subcarriers = CSI_BW160_DATA_COUNT; break;  // 160MHz
-                default: num_subcarriers = CSI_BW20_DATA_COUNT; break;  // Default to 20MHz
-            }
-            
-            //fprintf(stderr, "\tprocessRawData() ch_bw: %d, num_subcarriers: %d\n", csi->ch_bw, num_subcarriers);
-            
-            // Process all subcarriers for this bandwidth
-            for (size_t i = 0; i < num_subcarriers; i++)
-            {
-                std::complex<double> csi_complex(csi->data_i[i], csi->data_q[i]);
-                csi_per_antenna[csi->rx_idx][i] = csi_complex;
-                //fprintf(stderr, "\tprocessRawData() csi_data[%d]->i: 0x%x, csi_data[%d]->q: 0x%x\n", i, csi->data_i[i], i, csi->data_q[i]);
-            }
+        if (!raw)
+            continue;
 
-            if (csi->rx_idx == antIdx)
-            {
-                // Skip first few subcarriers to avoid DC offset issues
-                int start_idx = (num_subcarriers >= 64) ? 2 : 1;
-                int end_idx = num_subcarriers - 1; // Also skip last subcarrier
-                
-                // Store raw I/Q pairs (interleaved: I, Q, I, Q, ...)
-                std::vector<double> iq_data;
-                
-                for (int i = start_idx; i < end_idx; i++) {
-                    iq_data.push_back(static_cast<double>(csi->data_i[i]));
-                    iq_data.push_back(static_cast<double>(csi->data_q[i]));
-                }
-                
-                tones_per_packet[antIdx].push_back(iq_data);
-            }
-            
-            //fprintf(stderr, "\tprocessRawData() processed %d subcarriers\n", num_subcarriers);
+        const size_t sample_count = csi_valid_sample_count(*raw);
+        if (sample_count == 0)
+            continue;
+
+        CsiPacket packet;
+        packet.host_timestamp_ns = raw->host_timestamp_ns;
+        if (!packet.host_timestamp_ns)
+        {
+            packet.host_timestamp_ns = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count());
         }
+        packet.driver_timestamp = raw->ts;
+        packet.ext_info = raw->ext_info;
+        packet.h_idx = raw->h_idx;
+        packet.chain_info = raw->chain_info;
+        packet.transmitter_address = raw->ta;
+        packet.rssi = raw->rssi;
+        packet.snr = raw->snr;
+        packet.channel_bandwidth = raw->ch_bw;
+        packet.data_bandwidth = raw->data_bw;
+        packet.primary_channel_index = raw->pri_ch_idx;
+        packet.band = raw->band;
+        packet.rx_mode = raw->rx_mode;
+        packet.tx_index = raw->tx_idx;
+        packet.rx_index = raw->rx_idx;
+        packet.metadata_flags = raw->metadata_flags;
+        packet.presence_flags = raw->presence_flags;
+        packet.packet_sequence_number = raw->pkt_sn;
+        packet.segment_number = raw->segment_num;
+        packet.remain_last = raw->remain_last;
+        packet.transport_stream = raw->tr_stream;
+        packet.samples.reserve(sample_count);
+
+        // Keep the exact carrier order and all valid bins. Pilot/DC masking is
+        // a signal-processing decision and must not destroy capture data.
+        for (size_t index = 0; index < sample_count; ++index)
+            packet.samples.push_back({raw->data_i[index], raw->data_q[index]});
+
+        packets.push_back(std::move(packet));
     }
 
-
-    return tones_per_packet[antIdx];
+    return packets;
 }

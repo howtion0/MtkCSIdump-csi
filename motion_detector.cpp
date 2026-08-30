@@ -1,324 +1,309 @@
 #include "motion_detector.h"
-#include "wifi_drv_api/mt76_api.h"
+
 #include "parsers/parser_mt76.h"
+#include "udp_protocol.h"
+
+#include <algorithm>
+#include <cerrno>
 #include <chrono>
-#include <iostream>
-#include <thread>
 #include <cstring>
-#include <unistd.h>
+#include <iostream>
+#include <limits>
+#include <thread>
+#include <utility>
+
 #include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
-MotionDetector* MotionDetector::instance = nullptr;
-
-MotionDetector& MotionDetector::getInstance()
+namespace
 {
-    if (instance == nullptr)
-        instance = new MotionDetector();
+constexpr int CSI_PACKETS_PER_POLL = 96;
+constexpr size_t MAX_UDP_CLIENTS = 16;
+}
 
+MotionDetector *MotionDetector::instance = nullptr;
+
+MotionDetector &MotionDetector::getInstance()
+{
+    if (!instance)
+        instance = new MotionDetector();
     return *instance;
 }
 
 void MotionDetector::runMonitoring()
 {
-    std::chrono::time_point<std::chrono::steady_clock> currTime;
-    std::chrono::time_point<std::chrono::steady_clock> oldTime = startMon;
-    int diff;
-    int pkt_num;
     ParserMT76 parser;
 
-
-    while (!stopFlag.load()) {
-        currTime = std::chrono::steady_clock::now();
-        diff = std::chrono::duration_cast<std::chrono::milliseconds>(currTime - oldTime).count();
-        //TODO should we make this be based on the interval parameter again?
-        pkt_num = 100;
-        std::vector<csi_data *> *list = wifi.motion_detection_dump(ifname.c_str(), pkt_num);
-        oldTime = currTime;
-
-        dataMutex.lock();
-        unsigned antIdx = antMonIdx;
-        dataMutex.unlock();
-        for (int i = 0 ; i < ANTENNA_NUM; i++) {
-            if (list) {
-                std::vector<std::vector<double>> parsed_data = parser.processRawData(list, i);
-                if (parsed_data.size()) {
-                    // Send CSI data via UDP if server is running
-                    if (udpServerRunning) {
-                        // Send each packet separately instead of concatenating
-                        for (const auto& packet : parsed_data) {
-                            if (!packet.empty()) {
-                                std::vector<std::vector<double>> singlePacket = { packet };
-                                sendCsiDataUdp(singlePacket, i);
-                            }
-                        }
-                    }
-                } 
-            } 
+    while (!stopFlag.load())
+    {
+        std::vector<csi_data *> *raw =
+            wifi.motion_detection_dump(ifname.c_str(), CSI_PACKETS_PER_POLL);
+        if (raw)
+        {
+            for (const CsiPacket &packet : parser.processRawData(raw))
+            {
+                if (udpServerRunning.load())
+                    sendCsiDataUdp(packet);
+            }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(interval));
+        if (!stopFlag.load())
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval));
     }
 }
 
 void MotionDetector::udpServerListen()
 {
-    char buffer[1024];
-    struct sockaddr_in clientAddr;
-    socklen_t clientAddrLen = sizeof(clientAddr);
-
-    while (udpServerRunning) {
-        ssize_t recvLen = recvfrom(udpSocket, buffer, sizeof(buffer) - 1, 0, (struct sockaddr*)&clientAddr, &clientAddrLen);
-        if (recvLen > 0) {
-            buffer[recvLen] = '\0';
-            if (strcmp(buffer, "register") == 0) {
-                char clientIp[INET_ADDRSTRLEN];
-                inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, INET_ADDRSTRLEN);
-                int clientPort = ntohs(clientAddr.sin_port);
-                addUdpClient(clientIp, clientPort);
-            }
+    char buffer[128];
+    while (udpServerRunning.load())
+    {
+        struct sockaddr_in client_addr = {};
+        socklen_t client_addr_len = sizeof(client_addr);
+        const ssize_t received =
+            recvfrom(udpSocket, buffer, sizeof(buffer) - 1, 0,
+                     reinterpret_cast<struct sockaddr *>(&client_addr),
+                     &client_addr_len);
+        if (received < 0)
+        {
+            if (!udpServerRunning.load() || errno == EAGAIN || errno == EWOULDBLOCK ||
+                errno == EINTR)
+                continue;
+            std::cerr << "UDP registration receive failed: "
+                      << std::strerror(errno) << std::endl;
+            continue;
         }
+
+        buffer[received] = '\0';
+        if (std::strcmp(buffer, "register") != 0 &&
+            std::strcmp(buffer, "register-v2") != 0)
+            continue;
+
+        char client_ip[INET_ADDRSTRLEN] = {};
+        if (!inet_ntop(AF_INET, &client_addr.sin_addr, client_ip,
+                       sizeof(client_ip)))
+            continue;
+        addUdpClient(client_ip, ntohs(client_addr.sin_port));
     }
 }
 
-int MotionDetector::startMonitoring(std::string ifname, unsigned interval)
+int MotionDetector::startMonitoring(std::string interface_name,
+                                    unsigned poll_interval_ms)
 {
-    int ret;
+    if (interface_name.empty() || poll_interval_ms == 0)
+        return -EINVAL;
 
-    if (isMonitoring)
-        stopMonitoring();
-
-    if (interval == 0)
-        return -1;
-
-    this->ifname = ifname;
-    this->interval = interval;
-
-    ret = wifi.motion_detection_start(this->ifname.c_str());
-    startMon = std::chrono::steady_clock::now();
-    if (!ret)
+    if (isMonitoring.load())
     {
-        isMonitoring = true;
-        stopFlag.store(false);
-        monitorWorker = std::thread(&MotionDetector::runMonitoring, this);
+        const int stop_ret = stopMonitoring();
+        if (stop_ret < 0)
+            return stop_ret;
     }
 
-    return ret;
+    ifname = std::move(interface_name);
+    interval = poll_interval_ms;
+
+    const int ret = wifi.motion_detection_start(ifname.c_str());
+    if (ret < 0)
+    {
+        ifname.clear();
+        interval = 0;
+        return ret;
+    }
+
+    startMon = std::chrono::steady_clock::now();
+    stopFlag.store(false);
+    isMonitoring.store(true);
+    monitorWorker = std::thread(&MotionDetector::runMonitoring, this);
+    return 0;
 }
 
 int MotionDetector::stopMonitoring()
 {
-    int ret;
+    if (!isMonitoring.load())
+        return 0;
 
     stopFlag.store(true);
     if (monitorWorker.joinable())
         monitorWorker.join();
 
-    ret = wifi.motion_detection_stop(ifname.c_str());
-    if (!ret)
+    const int ret = wifi.motion_detection_stop(ifname.c_str());
+    // The worker is stopped even when the kernel reports a disable error. Keep
+    // enough state for the caller to retry rather than pretending success.
+    if (ret >= 0)
     {
-        isMonitoring = false;
+        isMonitoring.store(false);
         ifname.clear();
         interval = 0;
     }
-
     return ret;
 }
 
-int MotionDetector::setAntennaIdx(unsigned idx)
+int MotionDetector::setAntennaIdx(unsigned index)
 {
-    if (idx >= ANTENNA_NUM)
-        return -1;
+    if (index > std::numeric_limits<uint16_t>::max())
+        return -ERANGE;
 
-    dataMutex.lock();
-    antMonIdx = idx;
-    dataMutex.unlock();
-
+    std::lock_guard<std::mutex> lock(dataMutex);
+    antMonIdx = index;
     return 0;
 }
 
 unsigned MotionDetector::getAntennaIdx()
 {
-    dataMutex.lock();
-    unsigned antIdx = antMonIdx;
-    dataMutex.unlock();
-
-    return antIdx;
+    std::lock_guard<std::mutex> lock(dataMutex);
+    return antMonIdx;
 }
-
 
 double MotionDetector::getMotion()
 {
-    dataMutex.lock();
-    double motion = motion_result;
-    dataMutex.unlock();
-
-    return motion;
+    std::lock_guard<std::mutex> lock(dataMutex);
+    return motion_result;
 }
 
 bool MotionDetector::getIsMonitoring()
 {
-    return isMonitoring;
+    return isMonitoring.load();
 }
 
 int MotionDetector::startUdpServer(int port)
 {
-    if (udpServerRunning) {
-        std::cerr << "UDP server is already running" << std::endl;
-        return -1;
-    }
+    if (port <= 0 || port > 65535)
+        return -EINVAL;
+    if (udpServerRunning.load())
+        return -EALREADY;
 
-    // Create UDP socket
     udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (udpSocket < 0) {
-        std::cerr << "Failed to create UDP socket: " << strerror(errno) << std::endl;
-        return -1;
-    }
+    if (udpSocket < 0)
+        return -errno;
 
-    // Set socket options
-    int opt = 1;
-    if (setsockopt(udpSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
-        std::cerr << "Failed to set socket options: " << strerror(errno) << std::endl;
+    int enabled = 1;
+    if (setsockopt(udpSocket, SOL_SOCKET, SO_REUSEADDR, &enabled,
+                   sizeof(enabled)) < 0)
+    {
+        const int ret = -errno;
         close(udpSocket);
-        return -1;
+        udpSocket = -1;
+        return ret;
     }
 
-    // Bind socket
-    struct sockaddr_in serverAddr;
-    memset(&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
-    serverAddr.sin_port = htons(port);
-
-    if (bind(udpSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-        std::cerr << "Failed to bind UDP socket: " << strerror(errno) << std::endl;
+    struct timeval timeout = {};
+    timeout.tv_sec = 1;
+    if (setsockopt(udpSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+                   sizeof(timeout)) < 0)
+    {
+        const int ret = -errno;
         close(udpSocket);
-        return -1;
+        udpSocket = -1;
+        return ret;
     }
 
-    udpServerRunning = true;
+    struct sockaddr_in server_addr = {};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(static_cast<uint16_t>(port));
+    if (bind(udpSocket, reinterpret_cast<struct sockaddr *>(&server_addr),
+             sizeof(server_addr)) < 0)
+    {
+        const int ret = -errno;
+        close(udpSocket);
+        udpSocket = -1;
+        return ret;
+    }
+
+    sequence.store(0);
+    udpServerRunning.store(true);
     udpServerWorker = std::thread(&MotionDetector::udpServerListen, this);
-    std::cout << "UDP server started successfully on port " << port << std::endl;
+    std::cout << "CSI UDP v2 server listening on port " << port << std::endl;
     return 0;
 }
 
 int MotionDetector::stopUdpServer()
 {
-    if (!udpServerRunning) {
+    if (!udpServerRunning.exchange(false))
         return 0;
-    }
 
-    udpServerRunning = false;
-    
-    // Unblock recvfrom
-    shutdown(udpSocket, SHUT_RDWR);
-
-    if (udpServerWorker.joinable()) {
+    if (udpSocket >= 0)
+        shutdown(udpSocket, SHUT_RDWR);
+    if (udpServerWorker.joinable())
         udpServerWorker.join();
-    }
-
-    if (udpSocket >= 0) {
+    if (udpSocket >= 0)
+    {
         close(udpSocket);
         udpSocket = -1;
     }
 
-    udpMutex.lock();
+    std::lock_guard<std::mutex> lock(udpMutex);
     udpClients.clear();
-    udpMutex.unlock();
-
-    std::cout << "UDP server stopped" << std::endl;
     return 0;
 }
 
-void MotionDetector::addUdpClient(const std::string& clientIp, int clientPort)
+void MotionDetector::addUdpClient(const std::string &client_ip, int client_port)
 {
-    udpMutex.lock();
-    // Check if client already exists
-    auto it = std::find(udpClients.begin(), udpClients.end(), std::make_pair(clientIp, clientPort));
-    if (it == udpClients.end()) {
-        udpClients.push_back(std::make_pair(clientIp, clientPort));
-        std::cout << "Added UDP client: " << clientIp << ":" << clientPort << std::endl;
-    }
-    udpMutex.unlock();
-}
-
-void MotionDetector::removeUdpClient(const std::string& clientIp, int clientPort)
-{
-    udpMutex.lock();
-    auto it = std::find(udpClients.begin(), udpClients.end(), std::make_pair(clientIp, clientPort));
-    if (it != udpClients.end()) {
-        udpClients.erase(it);
-        std::cout << "Removed UDP client: " << clientIp << ":" << clientPort << std::endl;
-    }
-    udpMutex.unlock();
-}
-
-void MotionDetector::sendCsiDataUdp(const std::vector<std::vector<double>>& data, int antennaIdx)
-{
-    if (!udpServerRunning || udpSocket < 0) {
+    std::lock_guard<std::mutex> lock(udpMutex);
+    const auto client = std::make_pair(client_ip, client_port);
+    if (std::find(udpClients.begin(), udpClients.end(), client) !=
+        udpClients.end())
+        return;
+    if (udpClients.size() >= MAX_UDP_CLIENTS)
+    {
+        std::cerr << "Rejected UDP client " << client_ip << ':' << client_port
+                  << ": registration limit reached" << std::endl;
         return;
     }
 
-    udpMutex.lock();
-    auto clients = udpClients; // Copy to avoid holding lock too long
-    udpMutex.unlock();
+    udpClients.push_back(client);
+    std::cout << "Registered UDP client " << client_ip << ':' << client_port
+              << std::endl;
+}
 
-    if (clients.empty()) {
+void MotionDetector::removeUdpClient(const std::string &client_ip,
+                                     int client_port)
+{
+    std::lock_guard<std::mutex> lock(udpMutex);
+    const auto client = std::make_pair(client_ip, client_port);
+    const auto found = std::find(udpClients.begin(), udpClients.end(), client);
+    if (found != udpClients.end())
+        udpClients.erase(found);
+}
+
+void MotionDetector::sendCsiDataUdp(const CsiPacket &packet)
+{
+    if (!udpServerRunning.load() || udpSocket < 0)
+        return;
+
+    std::vector<std::pair<std::string, int>> clients;
+    {
+        std::lock_guard<std::mutex> lock(udpMutex);
+        clients = udpClients;
+    }
+    if (clients.empty())
+        return;
+
+    const std::vector<uint8_t> datagram =
+        csi_udp::encode_v2(packet, sequence.fetch_add(1));
+    if (datagram.empty())
+    {
+        std::cerr << "CSI packet cannot be represented by UDP v2" << std::endl;
         return;
     }
 
-    // Calculate total number of I/Q pairs (samples / 2 since each sample is I,Q pair)
-    uint32_t totalSamples = 0;
-    for (const auto& packet : data) {
-        totalSamples += packet.size() / 2; // I/Q pairs are interleaved
-    }
-
-    // Create header
-    CsiPacketHeader header;
-    header.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    header.antenna_idx = static_cast<uint32_t>(antennaIdx);
-    header.packet_count = static_cast<uint32_t>(data.size());
-    header.total_samples = totalSamples;
-
-    // Calculate total message size
-    size_t messageSize = sizeof(CsiPacketHeader) + totalSamples * sizeof(CsiSample);
-    
-    // Allocate buffer
-    std::vector<uint8_t> buffer(messageSize);
-    uint8_t* ptr = buffer.data();
-    
-    // Copy header
-    memcpy(ptr, &header, sizeof(CsiPacketHeader));
-    ptr += sizeof(CsiPacketHeader);
-    
-    // Copy CSI data as I/Q pairs
-    for (const auto& packet : data) {
-        for (size_t i = 0; i < packet.size(); i += 2) {
-            CsiSample sample;
-            sample.i = packet[i];     // I component
-            sample.q = packet[i + 1]; // Q component
-            memcpy(ptr, &sample, sizeof(CsiSample));
-            ptr += sizeof(CsiSample);
-        }
-    }
-
-    // Send to each UDP client
-    for (const auto& client : clients) {
-        struct sockaddr_in clientAddr;
-        memset(&clientAddr, 0, sizeof(clientAddr));
-        clientAddr.sin_family = AF_INET;
-        clientAddr.sin_port = htons(client.second);
-
-        // Convert IP address
-        if (inet_pton(AF_INET, client.first.c_str(), &clientAddr.sin_addr) <= 0) {
+    for (const auto &client : clients)
+    {
+        struct sockaddr_in client_addr = {};
+        client_addr.sin_family = AF_INET;
+        client_addr.sin_port = htons(static_cast<uint16_t>(client.second));
+        if (inet_pton(AF_INET, client.first.c_str(), &client_addr.sin_addr) != 1)
             continue;
-        }
 
-        ssize_t sent = sendto(udpSocket, buffer.data(), buffer.size(), 0,
-                             (struct sockaddr*)&clientAddr, sizeof(clientAddr));
-        
-        if (sent < 0) {
-            std::cerr << "Failed to send UDP data to " << client.first << ":" << client.second << ": " << strerror(errno) << std::endl;
+        if (sendto(udpSocket, datagram.data(), datagram.size(), 0,
+                   reinterpret_cast<struct sockaddr *>(&client_addr),
+                   sizeof(client_addr)) < 0 &&
+            udpServerRunning.load())
+        {
+            std::cerr << "CSI UDP send to " << client.first << ':'
+                      << client.second << " failed: " << std::strerror(errno)
+                      << std::endl;
         }
     }
 }
