@@ -35,7 +35,7 @@ if(CSI_BUILD_CAPTURE)
         motion_detector.cpp
         wifi_drv_api/mt76_api.cpp
     )
-    target_include_directories(CSIdump PRIVATE ${LIBNL_TINY_INCLUDE_DIR})
+    target_include_directories(CSIdump SYSTEM PRIVATE ${LIBNL_TINY_INCLUDE_DIR})
     target_compile_options(CSIdump PRIVATE -Wall -Wextra -Wpedantic)
     target_link_libraries(CSIdump PRIVATE
         csi_core
