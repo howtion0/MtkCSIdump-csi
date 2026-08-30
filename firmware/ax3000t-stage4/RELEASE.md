@@ -16,7 +16,9 @@
 - [ ] `source-patched-gates.json` is `pass` with no warning/failure.
 - [ ] `capture-source-gates.json` reconstructs the exact locked Git tree and
       matches the canonical OpenWrt rawgit `.tar.zst` size, SHA-256 and member
-      closure; codeload gzip bytes are not trusted as stable inputs.
+      closure. Fixed `/usr/bin` Git/Tar/Zstd identities, preserved Git archive
+      modes and one compression thread are bound into provenance; codeload
+      gzip bytes are not trusted as stable inputs.
 - [ ] `vanilla-abi-gates.json` proves IPK, exact kernel dependency,
       `this_module=0x440`, 294 undefined symbols and the locked hash.
 - [ ] `gate-report.json` is `pass` with every gate `pass`, including DTB,

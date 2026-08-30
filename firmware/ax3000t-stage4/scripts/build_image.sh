@@ -12,6 +12,13 @@ OUT_DIR="$2"
 OPENWRT_COMMIT="f0a60eee2fe051741c643ea6118718aae1ef17fb"
 OPENWRT_REVISION="r33051-f5dae5ece4"
 KWRT_COMMIT="aae059682faae01d600db7061c150f65de87a21e"
+CAPTURE_COMMIT="b8d7b73fc582795e734086a676a0a18a15980cb8"
+CAPTURE_TREE="9e54f6d5d1ac23ab8bc8ce18f6a40765d4e0417b"
+CAPTURE_TIMESTAMP="1788126290"
+CAPTURE_SUBDIR="mtkcsi-dump-2.0.0~git20260830.b8d7b73"
+CAPTURE_ARCHIVE_NAME="$CAPTURE_SUBDIR.tar.zst"
+CAPTURE_ARCHIVE_BYTES="14026970"
+CAPTURE_ARCHIVE_SHA256="6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18"
 SOURCE_DATE_EPOCH="1782770622"
 JOBS="${JOBS:-2}"
 STAGE4_SOURCE_COMMIT="${STAGE4_SOURCE_COMMIT:-}"
@@ -74,6 +81,12 @@ fi
 
 for tool in git patch make python3 sha256sum unsquashfs tar findmnt; do
   command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 2; }
+done
+for canonical_tool in /usr/bin/git /usr/bin/tar /usr/bin/zstd; do
+  if [[ ! -x "$canonical_tool" || -L "$canonical_tool" ]]; then
+    echo "missing or symlinked canonical archive tool: $canonical_tool" >&2
+    exit 2
+  fi
 done
 
 PUBLIC_KEY="$STAGE_DIR/keys/ax3000t-stage4.pub"
@@ -238,16 +251,61 @@ cp "$OPENWRT/.config" "$WORK_DIR/final.config"
 
 echo "[5/11] Downloading hash-verified sources" | tee -a "$LOG"
 require_disk_space
+CAPTURE_GIT="$WORK_DIR/capture-source.git"
+CAPTURE_PACK_ROOT="$WORK_DIR/capture-archive-pack"
+CAPTURE_TREE_DIR="$CAPTURE_PACK_ROOT/$CAPTURE_SUBDIR"
+CAPTURE_GIT_TAR="$WORK_DIR/capture-source.tar.git"
+CAPTURE_ARCHIVE_TMP="$WORK_DIR/$CAPTURE_ARCHIVE_NAME.tmp"
+CAPTURE_ARCHIVE="$OPENWRT/dl/$CAPTURE_ARCHIVE_NAME"
+if [[ "$(/usr/bin/git --version)" != "git version 2.34.1" ||
+      "$(/usr/bin/tar --version | sed -n '1p')" != "tar (GNU tar) 1.34" ||
+      "$(/usr/bin/zstd --version)" != *"v1.4.8"* ]]; then
+  echo "canonical capture-archive tool version differs from source-lock.json" >&2
+  exit 1
+fi
+echo "Pre-generating the canonical Stage3 archive with fixed paths, modes, and zstd threads" | tee -a "$LOG"
+/usr/bin/git init -q --bare "$CAPTURE_GIT"
+/usr/bin/git -C "$CAPTURE_GIT" remote add origin https://github.com/howtion0/MtkCSIdump-csi.git
+/usr/bin/git -C "$CAPTURE_GIT" fetch --depth=1 --no-tags origin "$CAPTURE_COMMIT" 2>&1 | tee -a "$LOG"
+if [[ "$(/usr/bin/git -C "$CAPTURE_GIT" rev-parse FETCH_HEAD)" != "$CAPTURE_COMMIT" ||
+      "$(/usr/bin/git -C "$CAPTURE_GIT" rev-parse "$CAPTURE_COMMIT^{tree}")" != "$CAPTURE_TREE" ||
+      "$(/usr/bin/git -C "$CAPTURE_GIT" show -s --format=%ct "$CAPTURE_COMMIT")" != "$CAPTURE_TIMESTAMP" ]]; then
+  echo "fetched capture commit/tree/timestamp differs from the canonical Stage3 lock" >&2
+  exit 1
+fi
+if /usr/bin/git -C "$CAPTURE_GIT" ls-tree -r "$CAPTURE_COMMIT" | grep -Eq '^(120000|160000) '; then
+  echo "canonical capture tree unexpectedly contains a symlink or gitlink" >&2
+  exit 1
+fi
+/usr/bin/git -C "$CAPTURE_GIT" -c core.abbrev=8 archive \
+  --format=tar --output="$CAPTURE_GIT_TAR" "$CAPTURE_COMMIT"
+install -d -m 0755 "$CAPTURE_TREE_DIR" "$OPENWRT/dl"
+/usr/bin/tar --same-permissions -C "$CAPTURE_TREE_DIR" -xf "$CAPTURE_GIT_TAR"
+/usr/bin/tar --numeric-owner --owner=0 --group=0 --mode=a-s --sort=name \
+  --mtime="@$CAPTURE_TIMESTAMP" -C "$CAPTURE_PACK_ROOT" -c "$CAPTURE_SUBDIR" | \
+  /usr/bin/zstd -q -T1 --ultra -20 -c > "$CAPTURE_ARCHIVE_TMP"
+if [[ "$(stat -c %s "$CAPTURE_ARCHIVE_TMP")" != "$CAPTURE_ARCHIVE_BYTES" ||
+      "$(sha256sum "$CAPTURE_ARCHIVE_TMP" | awk '{print $1}')" != "$CAPTURE_ARCHIVE_SHA256" ]]; then
+  echo "locally generated capture archive differs from its byte/hash lock" >&2
+  exit 1
+fi
+mv "$CAPTURE_ARCHIVE_TMP" "$CAPTURE_ARCHIVE"
+python3 "$STAGE_DIR/scripts/verify_capture_archive.py" \
+  --archive "$CAPTURE_ARCHIVE" \
+  --package-makefile "$STAGE_DIR/package/mtkcsi-dump/Makefile" \
+  --source-lock "$STAGE_DIR/source-lock.json" \
+  --zstd /usr/bin/zstd \
+  --output "$WORK_DIR/capture-source-preseed-gates.json" | tee -a "$LOG"
 "${MAKE[@]}" -j"$JOBS" download 2>&1 | tee -a "$LOG"
 if find "$OPENWRT/dl" -type f -size -1024c -print -quit | grep -q .; then
   echo "a suspiciously short download remains in dl/" >&2
   exit 1
 fi
-CAPTURE_ARCHIVE="$OPENWRT/dl/mtkcsi-dump-2.0.0~git20260830.b8d7b73.tar.zst"
 python3 "$STAGE_DIR/scripts/verify_capture_archive.py" \
   --archive "$CAPTURE_ARCHIVE" \
   --package-makefile "$STAGE_DIR/package/mtkcsi-dump/Makefile" \
   --source-lock "$STAGE_DIR/source-lock.json" \
+  --zstd /usr/bin/zstd \
   --output "$WORK_DIR/capture-source-gates.json" | tee -a "$LOG"
 
 python3 "$STAGE_DIR/scripts/download_closure.py" create \
@@ -533,6 +591,7 @@ provenance = {
     "capture_stage2_behavior_commit": "10adb198bc0a450e8906ac47f8dd4a14ab50c352",
     "capture_source_archive_bytes": 14026970,
     "capture_source_archive_sha256": "6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18",
+    "capture_source_archive_toolchain": source_lock["capture"]["canonical_toolchain"],
     "capture_stage3_validation": {
         "pytest_passed": 86,
         "ctest_passed": 2,

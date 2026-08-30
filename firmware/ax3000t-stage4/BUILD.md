@@ -124,12 +124,17 @@ misleading list of unavailable per-feed repositories.
 3. Apply only the locked one-line Kwrt vermagic transform, AX3000T
    DTS/platform patches, and `compat_version=2.0` anti-misflash patch.
 4. Derive the exact Kwrt configuration and assert only one target device.
-5. Download sources with OpenWrt hash checking, freeze a complete JSON closure
-   of every directory/file name, byte size and SHA-256, and end the networked
-   container. The capture package uses OpenWrt's native `git`/`rawgit`
-   normalization at the exact commit/tree. Only the canonical `.tar.zst`
-   (14,026,970 bytes, SHA-256 `6f02ffbe…`) is accepted; GitHub codeload gzip
-   bytes are explicitly not a stable build input.
+5. Materialize the capture source from the exact Git commit/tree before the
+   general OpenWrt download. The isolated path fixes `/usr/bin/git` 2.34.1,
+   `/usr/bin/tar` 1.34 with Git archive permissions preserved, and
+   `/usr/bin/zstd` 1.4.8 at one thread and ultra level 20. This prevents both
+   non-root `umask 022` and OpenWrt's later host-zstd shadowing from changing
+   the bytes. The full 109-member/tree gate runs before and after OpenWrt's
+   downloader; only the 14,026,970-byte, SHA-256 `6f02ffbe…` archive survives.
+   Then download the remaining sources with OpenWrt hash checking, freeze a
+   complete JSON closure of every directory/file name, byte size and SHA-256,
+   and end the networked container. GitHub codeload gzip bytes are never a
+   stable build input.
 6. Start a new `--network=none` container, revalidate the download closure and
    pinned signing identity, then build vanilla mt76 before adding CSI.
 7. Require vanilla IPK, `kernel (=6.12.94~1-r1)`, `this_module=0x440`, and

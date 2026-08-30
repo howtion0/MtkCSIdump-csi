@@ -11,9 +11,9 @@ PKG_SOURCE_VERSION:=b8d7b73fc582795e734086a676a0a18a15980cb8
 PKG_SOURCE_SUBMODULES:=skip
 PKG_SOURCE_SUBDIR:=$(PKG_NAME)-$(PKG_VERSION)
 PKG_SOURCE:=$(PKG_SOURCE_SUBDIR).tar.zst
-# A GitHub archive repack is accepted only if it already matches this hash;
-# otherwise OpenWrt discards it and raw-git fallback creates the locked,
-# owner-0, name-sorted, commit-mtime tar.zst. GitHub's outer gzip is not trusted.
+# Stage4 pre-generates this archive from the pinned Git tree with locked
+# git/tar/zstd paths, Git archive modes, owner 0, name order, commit mtime, and
+# one zstd thread. Mirrors or GitHub repacks are accepted only at this hash.
 PKG_MIRROR_HASH:=6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18
 PKG_MAINTAINER:=howtion0
 PKG_LICENSE:=Apache-2.0

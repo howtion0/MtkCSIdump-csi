@@ -99,7 +99,17 @@ def main() -> int:
             "source_archive_member_count": 109,
             "source_archive_members_sha256":
                 "49bab41ec3c541ec353acb9dc6df244d7724bf052e72fc3a56240f63c81d51f6",
-            "canonical_toolchain": {"git": "2.34.1", "gnu_tar": "1.34", "zstd": "1.4.8"},
+            "canonical_toolchain": {
+                "git": "2.34.1",
+                "git_path": "/usr/bin/git",
+                "gnu_tar": "1.34",
+                "gnu_tar_path": "/usr/bin/tar",
+                "preserve_git_archive_modes": True,
+                "zstd": "1.4.8",
+                "zstd_path": "/usr/bin/zstd",
+                "zstd_threads": 1,
+                "zstd_ultra_level": 20,
+            },
         }
         actual_lock = {name: capture_lock.get(name) for name in expected_lock}
         gates.append(gate("capture.source_lock.identity", actual_lock == expected_lock,
@@ -167,9 +177,10 @@ def main() -> int:
                     if len(content) != member.size:
                         raise ValueError("regular tar member size mismatch")
                     mode = member.mode & 0o7777
-                    # OpenWrt's rawgit path inherits Git archive's default
-                    # tar.umask=0002, hence canonical 0664/0775 members. Map
-                    # those two modes back to Git's 100644/100755 identities.
+                    # Git archive emits canonical 0664/0775 members. Stage4's
+                    # isolated materializer uses GNU tar --same-permissions so
+                    # OpenWrt's non-root umask cannot silently reduce them.
+                    # Map those modes back to Git's 100644/100755 identities.
                     if mode not in {0o664, 0o775}:
                         raise ValueError("regular tar member has unsupported Git mode")
                     git_mode = 0o100755 if mode == 0o775 else 0o100644

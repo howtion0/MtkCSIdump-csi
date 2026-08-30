@@ -320,6 +320,25 @@ class ReleaseBundleTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("provenance shape differs", result.stderr)
 
+    def test_rejects_wrong_capture_archive_toolchain_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source, bundle = self.fixture(Path(tmp))
+            provenance = json.loads((source / "build-provenance.json").read_text())
+            provenance["capture_source_archive_toolchain"]["zstd_threads"] = 0
+            data = (json.dumps(provenance) + "\n").encode()
+            (source / "build-provenance.json").write_bytes(data)
+            for sums_name in ("SHA256SUMS", "AUDIT-SHA256SUMS"):
+                lines = (source / sums_name).read_text().splitlines()
+                lines = [
+                    f"{digest(data)}  build-provenance.json"
+                    if line.endswith("  build-provenance.json") else line
+                    for line in lines
+                ]
+                (source / sums_name).write_text("\n".join(lines) + "\n")
+            result = self.run_bundle(source, bundle)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("provenance source/image identity differs", result.stderr)
+
     def test_rejects_symlinked_release_input(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

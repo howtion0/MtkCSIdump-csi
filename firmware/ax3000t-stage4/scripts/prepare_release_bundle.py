@@ -151,7 +151,8 @@ SOURCE_COMMON_GATE_NAMES = frozenset({
     "capture.package.sha256.files/mtkcsi.config",
     "capture.package.sha256.files/mtkcsi-dump.init", "capture.source.commit",
     "capture.source.archive_hash", "capture.source.git_protocol",
-    "capture.source.canonical_lock", "openwrt.commit", "openwrt.pristine.tree",
+    "capture.source.canonical_lock", "capture.source.archive_builder_lock",
+    "openwrt.commit", "openwrt.pristine.tree",
     "openwrt.revision.release_code",
     "kwrt.commit", "kwrt.tree", "kwrt.worktree.clean",
     "kwrt.config.common.sha256", "kwrt.config.target.sha256",
@@ -534,6 +535,8 @@ def main() -> int:
                 source_lock.get("capture", {}).get("source_archive_bytes") or
                 provenance.get("capture_source_archive_sha256") !=
                 source_lock.get("capture", {}).get("source_archive_sha256") or
+                provenance.get("capture_source_archive_toolchain") !=
+                source_lock.get("capture", {}).get("canonical_toolchain") or
                 provenance.get("capture_stage3_validation") !=
                 source_lock.get("capture", {}).get("stage3_validation") or
                 provenance.get("image_identity") != expected_image_identity):

@@ -68,7 +68,10 @@ The complete machine-readable lock is in `source-lock.json`.
 repository exists for this custom kernel ABI.
 
 The same locked `b8d7b73…` Git tree is carried in the canonical OpenWrt rawgit
-`.tar.zst` (not GitHub's mutable codeload gzip bytes) and contains the Stage3
+`.tar.zst` (not GitHub's mutable codeload gzip bytes). A Stage4 materializer
+fixes Git/Tar/Zstd paths, preserves Git archive modes and uses one compression
+thread before OpenWrt downloads anything else, then verifies the full archive
+both before and after the downloader. The archive contains the Stage3
 coarse-localization and calibration toolkit (86 pytest checks, 2/2 CTest,
 exact sdist-content and isolated-install/demo byte-comparison gates). Those Python algorithms remain
 host-side analysis tools: the router image installs only the small headless

@@ -19,6 +19,7 @@ class BuilderSnapshotLockTest(unittest.TestCase):
         self.sources = (ROOT / "container/apt-sources.list").read_text().splitlines()
         self.dockerfile = (ROOT / "container/Dockerfile").read_text()
         self.runner = (ROOT / "scripts/run_container_build.sh").read_text()
+        self.builder = (ROOT / "scripts/build_image.sh").read_text()
 
     def test_every_apt_source_is_the_exact_signed_snapshot(self) -> None:
         snapshot = self.lock["apt_snapshot"]
@@ -101,6 +102,36 @@ class BuilderSnapshotLockTest(unittest.TestCase):
         self.assertIn("date -u +%Y%m%dt%H%M%Sz", pair_runner)
         self.assertNotIn("date -u +%Y%m%dT%H%M%SZ", self.runner)
         self.assertNotIn("date -u +%Y%m%dT%H%M%SZ", pair_runner)
+
+    def test_capture_archive_materializer_locks_modes_paths_and_compressor(self) -> None:
+        toolchain = json.loads((ROOT / "source-lock.json").read_text())["capture"][
+            "canonical_toolchain"
+        ]
+        self.assertEqual(toolchain, {
+            "git": "2.34.1",
+            "git_path": "/usr/bin/git",
+            "gnu_tar": "1.34",
+            "gnu_tar_path": "/usr/bin/tar",
+            "preserve_git_archive_modes": True,
+            "zstd": "1.4.8",
+            "zstd_path": "/usr/bin/zstd",
+            "zstd_threads": 1,
+            "zstd_ultra_level": 20,
+        })
+        for token in (
+            '/usr/bin/tar --same-permissions -C "$CAPTURE_TREE_DIR"',
+            '/usr/bin/zstd -q -T1 --ultra -20 -c',
+            'CAPTURE_ARCHIVE_BYTES="14026970"',
+            'CAPTURE_ARCHIVE_SHA256="6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18"',
+        ):
+            self.assertIn(token, self.builder)
+        preseed = self.builder.index('mv "$CAPTURE_ARCHIVE_TMP" "$CAPTURE_ARCHIVE"')
+        download = self.builder.index('"${MAKE[@]}" -j"$JOBS" download')
+        self.assertLess(preseed, download)
+        self.assertEqual(
+            self.builder.count('python3 "$STAGE_DIR/scripts/verify_capture_archive.py"'),
+            2,
+        )
 
 
 if __name__ == "__main__":

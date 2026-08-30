@@ -361,6 +361,49 @@ def main() -> int:
               "members_sha256": "49bab41ec3c541ec353acb9dc6df244d7724bf052e72fc3a56240f63c81d51f6",
           },
           "exact Stage3 commit-tree canonical archive identity", capture_canonical)
+    archive_toolchain = lock["capture"].get("canonical_toolchain")
+    expected_archive_toolchain = {
+        "git": "2.34.1",
+        "git_path": "/usr/bin/git",
+        "gnu_tar": "1.34",
+        "gnu_tar_path": "/usr/bin/tar",
+        "preserve_git_archive_modes": True,
+        "zstd": "1.4.8",
+        "zstd_path": "/usr/bin/zstd",
+        "zstd_threads": 1,
+        "zstd_ultra_level": 20,
+    }
+    build_script = read_text(args.patch_dir.parent / "scripts/build_image.sh")
+    archive_builder_tokens = (
+        'CAPTURE_ARCHIVE_BYTES="14026970"',
+        'CAPTURE_ARCHIVE_SHA256="6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18"',
+        '"$(/usr/bin/git --version)" != "git version 2.34.1"',
+        '"$(/usr/bin/tar --version | sed -n \'1p\')" != "tar (GNU tar) 1.34"',
+        '"$(/usr/bin/zstd --version)" != *"v1.4.8"*',
+        '/usr/bin/tar --same-permissions -C "$CAPTURE_TREE_DIR" -xf "$CAPTURE_GIT_TAR"',
+        '/usr/bin/zstd -q -T1 --ultra -20 -c > "$CAPTURE_ARCHIVE_TMP"',
+        'mv "$CAPTURE_ARCHIVE_TMP" "$CAPTURE_ARCHIVE"',
+        '--zstd /usr/bin/zstd',
+    )
+    preseed_marker = 'mv "$CAPTURE_ARCHIVE_TMP" "$CAPTURE_ARCHIVE"'
+    download_marker = '"${MAKE[@]}" -j"$JOBS" download'
+    preseed_before_download = (
+        preseed_marker in build_script and download_marker in build_script and
+        build_script.index(preseed_marker) < build_script.index(download_marker)
+    )
+    check(gates, "capture.source.archive_builder_lock",
+          archive_toolchain == expected_archive_toolchain and
+          all(token in build_script for token in archive_builder_tokens) and
+          preseed_before_download and
+          build_script.count(
+              'python3 "$STAGE_DIR/scripts/verify_capture_archive.py"') == 2,
+          {"toolchain": expected_archive_toolchain,
+           "preseed_before_download": True, "full_verifications": 2},
+          {"toolchain": archive_toolchain,
+           "tokens_present": all(token in build_script for token in archive_builder_tokens),
+           "preseed_before_download": preseed_before_download,
+           "full_verifications": build_script.count(
+               'python3 "$STAGE_DIR/scripts/verify_capture_archive.py"')})
 
     try:
         openwrt_head = git(args.openwrt, "rev-parse", "HEAD")

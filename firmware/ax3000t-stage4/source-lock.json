@@ -95,8 +95,14 @@
     "source_archive_members_sha256": "49bab41ec3c541ec353acb9dc6df244d7724bf052e72fc3a56240f63c81d51f6",
     "canonical_toolchain": {
       "git": "2.34.1",
+      "git_path": "/usr/bin/git",
       "gnu_tar": "1.34",
-      "zstd": "1.4.8"
+      "gnu_tar_path": "/usr/bin/tar",
+      "preserve_git_archive_modes": true,
+      "zstd": "1.4.8",
+      "zstd_path": "/usr/bin/zstd",
+      "zstd_threads": 1,
+      "zstd_ultra_level": 20
     },
     "stage3_validation": {
       "pytest_passed": 86,
@@ -108,7 +114,7 @@
     "package": "mtkcsi-dump",
     "package_release": 1,
     "package_files": {
-      "Makefile": "1e2226f2be68643a55127eb9e5229e32b47e68b13abda7ecb820e78488292f7b",
+      "Makefile": "4c8ff8ca228ef7ea06c760c97159572e0c1f7f8e755e8ac91675f3e66ef0037c",
       "files/mtkcsi.config": "2d9407740ce1051f0403c423f01a951083d692095a1ee52ff7705b8bf9feabda",
       "files/mtkcsi-dump.init": "9691048cea2118702a0b2e012950c82acdbfedb662be3caadee493c58ca5f29a"
     },
