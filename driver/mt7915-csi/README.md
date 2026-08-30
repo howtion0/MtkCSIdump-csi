@@ -11,6 +11,7 @@
 - `tests/verify.py`：不需要 AX3000T 的离线验证器，检查基线、补丁可应用性、ABI 编号和异常 TLV 模型。
 - `patches/reference-nullcon-forward-port.patch`：研究阶段的原始 forward-port，仅保留作差异证据；构建请使用 hardened 补丁。
 - `SOURCES.md`：所有上游版本、来源和校验值；不要靠“最新版”复现驱动。
+- `reproduction/`：Stage 2 的离线 ABI 复现记录、Docker 构建脚本和公开镜像闸门。它证明 hardened 补丁能在官方 SDK 中编译，同时也证明该 SDK 的 `.gnu.linkonce.this_module=0x280`、APK 和内核依赖与 Kwrt 的 `0x440`、IPK 不兼容；SDK 产物只能作编译对照，绝不能安装或塞进固件镜像。
 
 ## 这版解决了什么
 

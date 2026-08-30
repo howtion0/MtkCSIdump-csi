@@ -95,6 +95,7 @@ struct DumpContext
     struct unl *netlink;
     std::vector<csi_data *> *output;
     u16 channel_frequency_mhz;
+    u8 channel_bandwidth;
     bool frequency_is_primary;
     bool tone_masked_reordered;
     bool parse_failed = false;
@@ -131,10 +132,12 @@ bool attr_u32(struct nlattr *attr, u32 &value)
     return true;
 }
 
-int read_interface_frequency(unsigned if_index, u16 &frequency_mhz,
-                             bool &frequency_is_primary)
+int read_interface_channel(unsigned if_index, u16 &frequency_mhz,
+                           u8 &channel_bandwidth,
+                           bool &frequency_is_primary)
 {
     frequency_mhz = 0;
+    channel_bandwidth = 0;
     frequency_is_primary = false;
 
     struct unl netlink = {};
@@ -178,6 +181,33 @@ int read_interface_frequency(unsigned if_index, u16 &frequency_mhz,
             return -ENODATA;
         }
         frequency_is_primary = true;
+    }
+
+    u32 raw_width = 0;
+    struct nlattr *width =
+        unl_find_attr(&netlink, reply, NL80211_ATTR_CHANNEL_WIDTH);
+    if (!attr_u32(width, raw_width))
+    {
+        nlmsg_free(reply);
+        unl_free(&netlink);
+        return -ENODATA;
+    }
+    switch (raw_width)
+    {
+    case NL80211_CHAN_WIDTH_20_NOHT:
+    case NL80211_CHAN_WIDTH_20:
+        channel_bandwidth = 0;
+        break;
+    case NL80211_CHAN_WIDTH_40:
+        channel_bandwidth = 1;
+        break;
+    case NL80211_CHAN_WIDTH_80:
+        channel_bandwidth = 2;
+        break;
+    default:
+        nlmsg_free(reply);
+        unl_free(&netlink);
+        return -EOPNOTSUPP;
     }
 
     nlmsg_free(reply);
@@ -434,6 +464,15 @@ public:
             entry->metadata_flags |= CSI_META_FREQ_IS_PRIMARY;
         if (context->tone_masked_reordered)
             entry->metadata_flags |= CSI_META_TONE_MASKED_REORDERED;
+        if (!(entry->metadata_flags & CSI_META_CH_BW_INFERRED) &&
+            entry->ch_bw != context->channel_bandwidth)
+        {
+            std::fprintf(stderr,
+                         "CSI channel width disagrees with nl80211 interface state\n");
+            context->parse_failed = true;
+            delete entry;
+            return NL_SKIP;
+        }
 
         entry->host_timestamp_ns = static_cast<u64>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -461,9 +500,11 @@ public:
         }
 
         u16 channel_frequency_mhz = 0;
+        u8 channel_bandwidth = 0;
         bool frequency_is_primary = false;
-        const int frequency_ret = read_interface_frequency(
-            if_index, channel_frequency_mhz, frequency_is_primary);
+        const int frequency_ret = read_interface_channel(
+            if_index, channel_frequency_mhz, channel_bandwidth,
+            frequency_is_primary);
         if (frequency_ret < 0)
         {
             std::fprintf(stderr,
@@ -472,6 +513,11 @@ public:
             clear_csi_list(csi_list);
             return nullptr;
         }
+        const bool channel_epoch_changed =
+            channel_state_valid &&
+            (channel_frequency_mhz != last_channel_frequency_mhz ||
+             channel_bandwidth != last_channel_bandwidth ||
+             frequency_is_primary != last_frequency_is_primary);
 
         clear_csi_list(csi_list);
         int remaining = packet_count;
@@ -519,8 +565,8 @@ public:
             nla_nest_end(msg, data);
 
             DumpContext context{&netlink, &csi_list, channel_frequency_mhz,
-                                frequency_is_primary, tone_masked_reordered,
-                                false};
+                                channel_bandwidth, frequency_is_primary,
+                                tone_masked_reordered, false};
             const int ret = unl_genl_request(&netlink, msg, csi_dump_callback,
                                              &context);
             unl_free(&netlink);
@@ -540,11 +586,14 @@ public:
         }
 
         u16 final_frequency_mhz = 0;
+        u8 final_channel_bandwidth = 0;
         bool final_frequency_is_primary = false;
-        const int final_frequency_ret = read_interface_frequency(
-            if_index, final_frequency_mhz, final_frequency_is_primary);
+        const int final_frequency_ret = read_interface_channel(
+            if_index, final_frequency_mhz, final_channel_bandwidth,
+            final_frequency_is_primary);
         if (final_frequency_ret < 0 ||
             final_frequency_mhz != channel_frequency_mhz ||
+            final_channel_bandwidth != channel_bandwidth ||
             final_frequency_is_primary != frequency_is_primary)
         {
             std::fprintf(stderr,
@@ -552,6 +601,20 @@ public:
                          "discarding the batch\n");
             clear_csi_list(csi_list);
             errno = final_frequency_ret < 0 ? -final_frequency_ret : EAGAIN;
+            return nullptr;
+        }
+
+        last_channel_frequency_mhz = final_frequency_mhz;
+        last_channel_bandwidth = final_channel_bandwidth;
+        last_frequency_is_primary = final_frequency_is_primary;
+        channel_state_valid = true;
+        if (channel_epoch_changed)
+        {
+            std::fprintf(stderr,
+                         "Channel changed between CSI polls; drained and "
+                         "discarded the first batch of the new radio epoch\n");
+            clear_csi_list(csi_list);
+            errno = EAGAIN;
             return nullptr;
         }
 
@@ -638,6 +701,7 @@ public:
             return errno ? -errno : -ENODEV;
 
         tone_masked_reordered = false;
+        channel_state_valid = false;
         int ret = set_csi(if_index, 2, 3, 0, 34); // QoS data frames.
         if (!ret)
             ret = set_csi(if_index, 2, 5, 2, 0); // Mask and reorder tones.
@@ -663,13 +727,20 @@ public:
             return errno ? -errno : -ENODEV;
         const int ret = set_csi(if_index, 0, 0, 0, 0);
         if (ret >= 0)
+        {
             tone_masked_reordered = false;
+            channel_state_valid = false;
+        }
         return ret;
     }
 
 private:
     std::vector<csi_data *> csi_list;
     bool tone_masked_reordered = false;
+    bool channel_state_valid = false;
+    u16 last_channel_frequency_mhz = 0;
+    u8 last_channel_bandwidth = 0;
+    bool last_frequency_is_primary = false;
 };
 
 MT76API::MT76API() : d(new MT76APIPrivate()) {}

@@ -155,7 +155,11 @@ mode hint, not a separately validated PPDU-type or MCS field.
   source supplies it. The capture executable queries the interface with the
   read-only `NL80211_CMD_GET_INTERFACE` request for every dump batch, preferring
   `CENTER_FREQ1` and marking a `WIPHY_FREQ` primary-channel fallback in the
-  quality flags. A before/after mismatch discards that batch. Capture startup
+  quality flags. The reported nl80211 width must also agree with a non-inferred
+  CSI `ch_bw`; a frequency or width change before/after a dump discards that
+  batch. A change detected between polls also drains and discards the first
+  batch of the new radio epoch, preventing queued old-channel records from
+  being mislabeled. Capture startup
   also requests the driver's type-5 tone mask+reorder mode and marks successful
   records, so localization code can refuse unknown carrier ordering.
   `pri_ch_idx` is not an IEEE channel number.
