@@ -1,0 +1,56 @@
+{
+  "schema": "ax3000t-csi-session",
+  "schema_version": 1,
+  "session_id": "SYNTHETIC-AX3000T-A-target",
+  "receiver_id": "SYNTHETIC-AX3000T-A",
+  "router_model": "SYNTHETIC AX3000T",
+  "interface": "synthetic-radio0",
+  "boot_id": "SYNTHETIC-AX3000T-A-boot-1",
+  "radio_epoch": "synthetic-radio-epoch-1",
+  "timebase": {
+    "id": "synthetic-shared-timebase",
+    "maximum_uncertainty_ns": 1000
+  },
+  "driver_commit": "synthetic-stage2-commit",
+  "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "capture": {
+    "file": "SYNTHETIC-AX3000T-A-target.synthetic.csi2f",
+    "sha256": "fa374d601e41aed93fce884b18f2df6eced7f2859f9b7ef8eb0c43f4eea3e9b9",
+    "framing": "u32-be-length+csi2-datagram",
+    "start_host_timestamp_ns": 1800000000000000000,
+    "end_host_timestamp_ns": 1800000000195000000
+  },
+  "udp": {
+    "registration_payload": "register-v2",
+    "sender_allowlist": [
+      "127.0.0.1:8888"
+    ],
+    "sequence_stats": {
+      "accepted_datagrams": 80,
+      "duplicate_datagrams": 0,
+      "out_of_order_datagrams": 0,
+      "estimated_lost_datagrams": 0,
+      "first_sequence": 0,
+      "last_sequence": 79
+    }
+  },
+  "transmitter_allowlist": [
+    "02:00:00:00:00:01"
+  ],
+  "radio_config": {
+    "band": 1,
+    "channel_frequency_mhz": 5500,
+    "channel_bw_enum": 0,
+    "channel_bw_mhz": 20,
+    "data_bw_enum": 0,
+    "data_bw_mhz": 20,
+    "sample_count": 64,
+    "rx_mode": 4,
+    "subcarrier_spacing_hz": 312500.0,
+    "tone_mode": "stage2-type5-masked-reordered-canonical",
+    "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+    "frequency_source": "center"
+  },
+  "synthetic": true,
+  "privacy_notice": "CSI includes transmitter identifiers and occupancy-correlated radio data; collect only with authorization and do not publish raw captures."
+}

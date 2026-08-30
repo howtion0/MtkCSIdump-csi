@@ -1,0 +1,24 @@
+{
+  "receiver_id": "REPLACE-WITH-THIS-ROUTER-ID",
+  "reference_rx_idx": 0,
+  "target_rx_idx": 1,
+  "tx_idx": 0,
+  "transport_stream": 0,
+  "require_transport_stream_absent": false,
+  "array_broadside_heading_deg": 0.0,
+  "elements": [
+    {
+      "chain_id": 0,
+      "name": "MEASURED-REFERENCE-ANTENNA",
+      "position_m": [0.0, -0.014],
+      "connector": "MEASURE-ME"
+    },
+    {
+      "chain_id": 1,
+      "name": "MEASURED-TARGET-ANTENNA",
+      "position_m": [0.0, 0.014],
+      "connector": "MEASURE-ME"
+    }
+  ],
+  "notes": "EXAMPLE ONLY. The 28 mm spacing and chain ids are placeholders, not AX3000T measurements. Open the router, trace the RF paths, and measure positions before calibration."
+}

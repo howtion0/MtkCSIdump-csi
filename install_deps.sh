@@ -19,7 +19,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "You can now run the CSI UDP Client GUI with:"
     echo "python3 csi_udp_client_gui.py <server_ip> <port>"
-    echo "Example: python3 csi_udp_client_gui.py 192.168.168.1 8888"
+    echo "Example (documentation-only IP): python3 csi_udp_client_gui.py 192.0.2.1 8888"
 else
     echo "Failed to install dependencies. Please check the error messages above."
     exit 1

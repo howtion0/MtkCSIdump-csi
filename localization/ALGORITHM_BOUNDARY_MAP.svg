@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">AX3000T CSI 十六类算法与可实现边界</title>
+  <desc id="desc">从每包双接收链复数 CSI 到信号处理、感知、方位距离和炫技展示的算法分类。绿色表示单台 AX3000T 可验证，黄色表示需要标定、训练或额外接收机，红色表示单台设备不能可信实现。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071322"/>
+      <stop offset="0.52" stop-color="#0c1e31"/>
+      <stop offset="1" stop-color="#10283a"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#49d6ff" stop-opacity="0.15"/>
+      <stop offset="0.5" stop-color="#49d6ff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#9a7bff" stop-opacity="0.15"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      text { font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }
+      .h1 { fill:#f5fbff; font-size:42px; font-weight:700; }
+      .sub { fill:#9ec4d8; font-size:20px; }
+      .col { fill:#d9eff9; font-size:22px; font-weight:700; letter-spacing:1px; }
+      .name { fill:#f5fbff; font-size:19px; font-weight:700; }
+      .detail { fill:#afcad8; font-size:15px; }
+      .tiny { fill:#87aabd; font-size:14px; }
+      .good { fill:#44d7a8; }
+      .conditional { fill:#f5ba54; }
+      .blocked { fill:#ff7188; }
+      .card { fill:#102a3d; stroke:#28485b; stroke-width:1.4; }
+      .line { stroke:url(#beam); stroke-width:4; fill:none; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1080" fill="url(#bg)"/>
+  <circle cx="1420" cy="110" r="190" fill="#45cfff" opacity="0.035"/>
+  <circle cx="150" cy="940" r="240" fill="#9a7bff" opacity="0.035"/>
+
+  <text x="72" y="76" class="h1">AX3000T CSI：16 类算法，从“能测”到“不能硬吹”</text>
+  <text x="74" y="112" class="sub">现实输入：MT7976CN · 2×2 MIMO · 每包双 Rx 复数 I/Q · 64/128/256 tones · 固定频道</text>
+
+  <g transform="translate(74 142)">
+    <circle cx="9" cy="8" r="7" class="good"/><text x="25" y="14" class="tiny">单台可验证</text>
+    <circle cx="161" cy="8" r="7" class="conditional"/><text x="177" y="14" class="tiny">需标定／标签／多接收机</text>
+    <circle cx="403" cy="8" r="7" class="blocked"/><text x="419" y="14" class="tiny">单台不可可信宣称</text>
+  </g>
+
+  <path d="M185 247 C250 247 257 247 319 247 M665 247 C720 247 733 247 790 247 M1135 247 C1190 247 1205 247 1262 247" class="line"/>
+
+  <g transform="translate(70 190)">
+    <text x="0" y="0" class="col">① 数据可信层</text>
+    <rect x="0" y="26" width="270" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="53" r="6" class="good"/>
+    <text x="38" y="60" class="name">1. 协议与 PPDU 配对</text>
+    <text x="22" y="87" class="detail">长度、tone、BW、TA、序号、</text>
+    <text x="22" y="108" class="detail">同 Tx／stream／双 Rx 硬门</text>
+
+    <rect x="0" y="146" width="270" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="173" r="6" class="good"/>
+    <text x="38" y="180" class="name">2. 幅度清洗</text>
+    <text x="22" y="207" class="detail">Hampel／中值／低通／PCA</text>
+    <text x="22" y="228" class="detail">去异常、去慢漂，不创造信息</text>
+
+    <rect x="0" y="266" width="270" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="293" r="6" class="conditional"/>
+    <text x="38" y="300" class="name">3. 相位校准／CSI ratio</text>
+    <text x="22" y="327" class="detail">H₂/H₁、圆统计、馈线偏置</text>
+    <text x="22" y="348" class="detail">必须实测链映射与重启状态</text>
+
+    <rect x="0" y="386" width="270" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="413" r="6" class="good"/>
+    <text x="38" y="420" class="name">4. 时频／Doppler</text>
+    <text x="22" y="447" class="detail">STFT、小波、谱能量、速度纹理</text>
+    <text x="22" y="468" class="detail">需要稳定固定发包率</text>
+
+    <rect x="0" y="506" width="270" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="533" r="6" class="good"/>
+    <text x="38" y="540" class="name">5. relative CIR／PDP</text>
+    <text x="22" y="567" class="detail">逐包 IFFT、峰对齐、非相干平均</text>
+    <text x="22" y="588" class="detail">只看多径形态，不是米制距离</text>
+  </g>
+
+  <g transform="translate(390 190)">
+    <text x="0" y="0" class="col">② 感知与分类层</text>
+    <rect x="0" y="26" width="340" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="53" r="6" class="good"/>
+    <text x="38" y="60" class="name">6. Presence／Motion</text>
+    <text x="22" y="87" class="detail">方差、基线差、谱熵、变化点</text>
+    <text x="22" y="108" class="detail">最稳健的单机“有人／在动”</text>
+
+    <rect x="0" y="146" width="340" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="173" r="6" class="conditional"/>
+    <text x="38" y="180" class="name">7. 呼吸周期候选</text>
+    <text x="22" y="207" class="detail">带通、相位差、周期峰与质量门</text>
+    <text x="22" y="228" class="detail">需静止、近场、有利链路；不诊断</text>
+
+    <rect x="0" y="266" width="340" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="293" r="6" class="conditional"/>
+    <text x="38" y="300" class="name">8. 动作／手势分类</text>
+    <text x="22" y="327" class="detail">kNN／SVM／RF／CNN／LSTM／Transformer</text>
+    <text x="22" y="348" class="detail">每个房间、人物、姿态都要真值</text>
+
+    <rect x="0" y="386" width="340" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="413" r="6" class="conditional"/>
+    <text x="38" y="420" class="name">9. 跨域学习</text>
+    <text x="22" y="447" class="detail">MMD／自训练／伪标签／元学习</text>
+    <text x="22" y="468" class="detail">降低补标量，不等于零样本迁移</text>
+  </g>
+
+  <g transform="translate(790 190)">
+    <text x="0" y="0" class="col">③ 方位、距离与二维层</text>
+    <rect x="0" y="26" width="345" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="53" r="6" class="conditional"/>
+    <text x="38" y="60" class="name">10. 距离标签／指纹</text>
+    <text x="22" y="87" class="detail">RSSI + CSI 特征 → near／mid／far</text>
+    <text x="22" y="108" class="detail">换手机、房间、握姿会域漂移</text>
+
+    <rect x="0" y="146" width="345" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="173" r="6" class="conditional"/>
+    <text x="38" y="180" class="name">11. 双阵元 Bartlett AoA</text>
+    <text x="22" y="207" class="detail">13／17／25 扇区 normalized support</text>
+    <text x="22" y="228" class="detail">粗左中右；保留前后镜像与栅瓣</text>
+
+    <rect x="0" y="266" width="345" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="293" r="6" class="blocked"/>
+    <text x="38" y="300" class="name">12. MUSIC／ESPRIT／SAGE</text>
+    <text x="22" y="327" class="detail">超级分辨率多径 AoA</text>
+    <text x="22" y="348" class="detail">双阵元孔径不足，漂亮峰不等于真峰</text>
+
+    <rect x="0" y="386" width="345" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="413" r="6" class="blocked"/>
+    <text x="38" y="420" class="name">13. ToF／FTM 米制测距</text>
+    <text x="22" y="447" class="detail">需真实 RTT 或跨频道相干带宽</text>
+    <text x="22" y="468" class="detail">固定频道 CSI 峰不能直接乘光速</text>
+
+    <rect x="0" y="506" width="345" height="106" rx="14" class="card"/>
+    <circle cx="22" cy="533" r="6" class="conditional"/>
+    <text x="38" y="540" class="name">14. 多 receiver 融合／跟踪</text>
+    <text x="22" y="567" class="detail">网格乘积、粒子滤波、EKF／HMM</text>
+    <text x="22" y="588" class="detail">需物理分离、共同时间基与坐标</text>
+  </g>
+
+  <g transform="translate(1195 190)">
+    <text x="0" y="0" class="col">④ 炫技显示层</text>
+    <rect x="0" y="26" width="335" height="135" rx="14" class="card"/>
+    <circle cx="22" cy="53" r="6" class="blocked"/>
+    <text x="38" y="60" class="name">15. RF tomography／成像</text>
+    <text x="22" y="87" class="detail">多链路遮挡反演、体素热力图</text>
+    <text x="22" y="108" class="detail">需许多 Tx–Rx 路径与标定</text>
+    <text x="22" y="133" class="detail">单 AX 只能画“链路变化”，不能成像</text>
+
+    <rect x="0" y="176" width="335" height="135" rx="14" class="card"/>
+    <circle cx="22" cy="203" r="6" class="blocked"/>
+    <text x="38" y="210" class="name">16. Pose／DensePose／人体网格</text>
+    <text x="22" y="237" class="detail">需要大规模同步 RF + 姿态真值</text>
+    <text x="22" y="258" class="detail">RuView 式骨架不能由双 Rx 凭空恢复</text>
+    <text x="22" y="283" class="detail">必须把 synthetic 与现场数据分开</text>
+
+    <rect x="0" y="345" width="335" height="267" rx="18" fill="#0b2133" stroke="#37708c" stroke-width="1.5"/>
+    <text x="22" y="382" class="name" fill="#76dcff">可信的“接近 RuView”上限</text>
+    <path d="M42 438 C105 388 163 492 224 432 C258 399 280 420 305 402" fill="none" stroke="#49d6ff" stroke-width="5" filter="url(#glow)"/>
+    <circle cx="96" cy="465" r="32" fill="#49d6ff" opacity="0.16"/>
+    <circle cx="219" cy="446" r="48" fill="#9a7bff" opacity="0.16"/>
+    <circle cx="219" cy="446" r="10" fill="#f5ba54" filter="url(#glow)"/>
+    <text x="22" y="518" class="detail">真实房间 + 动态 Tx–Rx 光束</text>
+    <text x="22" y="542" class="detail">粗扇区 + relative CIR 波纹</text>
+    <text x="22" y="566" class="detail">多接收机 fused-support 能量团</text>
+    <text x="22" y="592" class="tiny">粒子／人体团 = decorative，永久标注</text>
+  </g>
+
+  <g transform="translate(70 855)">
+    <rect x="0" y="0" width="1460" height="155" rx="20" fill="#0a1d2c" stroke="#31586e" stroke-width="1.5"/>
+    <text x="28" y="42" class="col">一句话边界</text>
+    <text x="28" y="78" class="name">单台 AX3000T 最可信：稳定采集 → 有人／移动 → 本地 near／mid／far → 校准后的粗扇区。</text>
+    <text x="28" y="111" class="name">想要二维“能量团”：至少两台物理分离且同步的 receiver；想要人体轮廓：需要完全不同规模的数据与真值。</text>
+    <text x="28" y="137" class="tiny">算法名称不会突破天线孔径、有效带宽、相位校准、时间同步和训练域这五条物理边界。</text>
+  </g>
+</svg>

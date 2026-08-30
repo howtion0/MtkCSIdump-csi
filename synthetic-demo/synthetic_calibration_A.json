@@ -1,0 +1,481 @@
+{
+  "schema": "ax3000t-chain-calibration",
+  "schema_version": 3,
+  "calibration_id": "sha256:5169416622687a1688f380c8ec0411c304060ebbd27139cf244f1303dcdf54a9",
+  "mapping": {
+    "receiver_id": "SYNTHETIC-AX3000T-A",
+    "reference_rx_idx": 0,
+    "target_rx_idx": 1,
+    "tx_idx": 0,
+    "transport_stream": 0,
+    "require_transport_stream_absent": false,
+    "array_broadside_heading_deg": 0.0,
+    "elements": [
+      {
+        "chain_id": 0,
+        "name": "synthetic-reference",
+        "position_m": [
+          0.0,
+          -0.014
+        ],
+        "connector": "SYN0"
+      },
+      {
+        "chain_id": 1,
+        "name": "synthetic-target",
+        "position_m": [
+          0.0,
+          0.014
+        ],
+        "connector": "SYN1"
+      }
+    ],
+    "notes": "SYNTHETIC SIMULATION — NOT HARDWARE EVIDENCE"
+  },
+  "session_manifest": {
+    "schema": "ax3000t-csi-session",
+    "schema_version": 1,
+    "session_id": "SYNTHETIC-AX3000T-A-calibration",
+    "receiver_id": "SYNTHETIC-AX3000T-A",
+    "router_model": "SYNTHETIC AX3000T",
+    "interface": "synthetic-radio0",
+    "boot_id": "SYNTHETIC-AX3000T-A-boot-1",
+    "radio_epoch": "synthetic-radio-epoch-1",
+    "timebase": {
+      "id": "synthetic-shared-timebase",
+      "maximum_uncertainty_ns": 1000
+    },
+    "driver_commit": "synthetic-stage2-commit",
+    "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "capture": {
+      "file": "SYNTHETIC-AX3000T-A-calibration.synthetic.csi2f",
+      "sha256": "1be137a90cf051eca753310bfa387ffa174deb733ce5406002524ca2236f0344",
+      "framing": "u32-be-length+csi2-datagram",
+      "start_host_timestamp_ns": 1800000000000000000,
+      "end_host_timestamp_ns": 1800000000175000000
+    },
+    "udp": {
+      "registration_payload": "register-v2",
+      "sender_allowlist": [
+        "127.0.0.1:8888"
+      ],
+      "sequence_stats": {
+        "accepted_datagrams": 72,
+        "duplicate_datagrams": 0,
+        "out_of_order_datagrams": 0,
+        "estimated_lost_datagrams": 0,
+        "first_sequence": 0,
+        "last_sequence": 71
+      }
+    },
+    "transmitter_allowlist": [
+      "02:00:00:00:00:01"
+    ],
+    "radio_config": {
+      "band": 1,
+      "channel_frequency_mhz": 5500,
+      "channel_bw_enum": 0,
+      "channel_bw_mhz": 20,
+      "data_bw_enum": 0,
+      "data_bw_mhz": 20,
+      "sample_count": 64,
+      "rx_mode": 4,
+      "subcarrier_spacing_hz": 312500.0,
+      "tone_mode": "stage2-type5-masked-reordered-canonical",
+      "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+      "frequency_source": "center"
+    },
+    "synthetic": true,
+    "privacy_notice": "CSI includes transmitter identifiers and occupancy-correlated radio data; collect only with authorization and do not publish raw captures."
+  },
+  "validation_session_manifest": {
+    "schema": "ax3000t-csi-session",
+    "schema_version": 1,
+    "session_id": "SYNTHETIC-AX3000T-A-validation",
+    "receiver_id": "SYNTHETIC-AX3000T-A",
+    "router_model": "SYNTHETIC AX3000T",
+    "interface": "synthetic-radio0",
+    "boot_id": "SYNTHETIC-AX3000T-A-boot-1",
+    "radio_epoch": "synthetic-radio-epoch-1",
+    "timebase": {
+      "id": "synthetic-shared-timebase",
+      "maximum_uncertainty_ns": 1000
+    },
+    "driver_commit": "synthetic-stage2-commit",
+    "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "capture": {
+      "file": "SYNTHETIC-AX3000T-A-validation.synthetic.csi2f",
+      "sha256": "d013ec48e06a1c4198ff1a4e564f74c1482429c7f285a379c2236a2554d2b87d",
+      "framing": "u32-be-length+csi2-datagram",
+      "start_host_timestamp_ns": 1800000000000000000,
+      "end_host_timestamp_ns": 1800000000175000000
+    },
+    "udp": {
+      "registration_payload": "register-v2",
+      "sender_allowlist": [
+        "127.0.0.1:8888"
+      ],
+      "sequence_stats": {
+        "accepted_datagrams": 72,
+        "duplicate_datagrams": 0,
+        "out_of_order_datagrams": 0,
+        "estimated_lost_datagrams": 0,
+        "first_sequence": 0,
+        "last_sequence": 71
+      }
+    },
+    "transmitter_allowlist": [
+      "02:00:00:00:00:01"
+    ],
+    "radio_config": {
+      "band": 1,
+      "channel_frequency_mhz": 5500,
+      "channel_bw_enum": 0,
+      "channel_bw_mhz": 20,
+      "data_bw_enum": 0,
+      "data_bw_mhz": 20,
+      "sample_count": 64,
+      "rx_mode": 4,
+      "subcarrier_spacing_hz": 312500.0,
+      "tone_mode": "stage2-type5-masked-reordered-canonical",
+      "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+      "frequency_source": "center"
+    },
+    "synthetic": true,
+    "privacy_notice": "CSI includes transmitter identifiers and occupancy-correlated radio data; collect only with authorization and do not publish raw captures."
+  },
+  "subcarrier_spacing_hz": 312500.0,
+  "known_angle_deg": 25.0,
+  "validation_angle_deg": -25.0,
+  "packet_count": 36,
+  "validation_packet_count": 36,
+  "cross_angle_phase_residual_median_rad": 0.005864352069805772,
+  "cross_angle_phase_residual_p90_rad": 0.015497955918715844,
+  "minimum_valid_tone_fraction": 0.75,
+  "created_utc": "2000-01-01T00:00:00+00:00",
+  "synthetic": true,
+  "complex_ratio": [
+    {
+      "real": 0.6766294320506079,
+      "imag": 0.38235388335221615
+    },
+    {
+      "real": 0.685395497369637,
+      "imag": 0.3855903421838769
+    },
+    {
+      "real": 0.6835038067140942,
+      "imag": 0.37737744102509474
+    },
+    {
+      "real": 0.6893199089366806,
+      "imag": 0.38896968335444115
+    },
+    {
+      "real": 0.6806832929167886,
+      "imag": 0.3874686965799501
+    },
+    {
+      "real": 0.6816783720238362,
+      "imag": 0.39544389661384477
+    },
+    {
+      "real": 0.6780248100987843,
+      "imag": 0.39822367991327245
+    },
+    {
+      "real": 0.6819780742319469,
+      "imag": 0.4050836282169662
+    },
+    {
+      "real": 0.6849867690369776,
+      "imag": 0.41023631980271613
+    },
+    {
+      "real": 0.6904472188555987,
+      "imag": 0.4170500522496652
+    },
+    {
+      "real": 0.6971283745000948,
+      "imag": 0.42348493818773225
+    },
+    {
+      "real": 0.6814292138804624,
+      "imag": 0.43767261534347124
+    },
+    {
+      "real": 0.6861530468097561,
+      "imag": 0.43024595266760346
+    },
+    {
+      "real": 0.6857715304036713,
+      "imag": 0.43718997115262115
+    },
+    {
+      "real": 0.6963899125405468,
+      "imag": 0.46037444129763216
+    },
+    {
+      "real": 0.7045308830014063,
+      "imag": 0.47166979115092006
+    },
+    {
+      "real": 0.7059347013943796,
+      "imag": 0.4745442276752864
+    },
+    {
+      "real": 0.7081127900529656,
+      "imag": 0.4830440881718051
+    },
+    {
+      "real": 0.7122698067702424,
+      "imag": 0.48856201165243884
+    },
+    {
+      "real": 0.7012172089629286,
+      "imag": 0.5174390114770906
+    },
+    {
+      "real": 0.6935496878465207,
+      "imag": 0.49976686827585626
+    },
+    {
+      "real": 0.7136436951648617,
+      "imag": 0.5049094315549525
+    },
+    {
+      "real": 0.6981472620395015,
+      "imag": 0.5160856691548533
+    },
+    {
+      "real": 0.7043954565390175,
+      "imag": 0.5355785746872028
+    },
+    {
+      "real": 0.7061796559372586,
+      "imag": 0.5391408110065747
+    },
+    {
+      "real": 0.694921706149975,
+      "imag": 0.5478742871726852
+    },
+    {
+      "real": 0.705362351589598,
+      "imag": 0.5531732100197466
+    },
+    {
+      "real": 0.7005016583558444,
+      "imag": 0.561324885187743
+    },
+    {
+      "real": 0.6893343541837432,
+      "imag": 0.565871643153613
+    },
+    {
+      "real": 0.6857146154648738,
+      "imag": 0.5706858752700321
+    },
+    {
+      "real": 0.6718269319628509,
+      "imag": 0.5867133516149131
+    },
+    {
+      "real": 0.6708030569408392,
+      "imag": 0.5855569145517826
+    },
+    {
+      "real": 0.6691797573025714,
+      "imag": 0.5966971750169557
+    },
+    {
+      "real": 0.6817150927116833,
+      "imag": 0.6088176049708629
+    },
+    {
+      "real": 0.6661197811371111,
+      "imag": 0.6137180299763016
+    },
+    {
+      "real": 0.6525095818082354,
+      "imag": 0.6170298382141575
+    },
+    {
+      "real": 0.6415837446570232,
+      "imag": 0.6185148242543343
+    },
+    {
+      "real": 0.6351863202052472,
+      "imag": 0.6176972934754165
+    },
+    {
+      "real": 0.6330110248832825,
+      "imag": 0.6276179084890421
+    },
+    {
+      "real": 0.6131268851573373,
+      "imag": 0.6357033201648264
+    },
+    {
+      "real": 0.6098242604264171,
+      "imag": 0.6404180898133198
+    },
+    {
+      "real": 0.5974452146208653,
+      "imag": 0.6467821115788226
+    },
+    {
+      "real": 0.5981907881438912,
+      "imag": 0.6455027848251826
+    },
+    {
+      "real": 0.5631006283272109,
+      "imag": 0.645466430023692
+    },
+    {
+      "real": 0.5616083561407904,
+      "imag": 0.6533324612147243
+    },
+    {
+      "real": 0.5497104566256283,
+      "imag": 0.646601826901487
+    },
+    {
+      "real": 0.5368691240336764,
+      "imag": 0.6447148441085357
+    },
+    {
+      "real": 0.5356703767675702,
+      "imag": 0.6553133877350127
+    },
+    {
+      "real": 0.5161467729157155,
+      "imag": 0.6524892350928295
+    },
+    {
+      "real": 0.5111672886950835,
+      "imag": 0.6618322900140644
+    },
+    {
+      "real": 0.49107288725113624,
+      "imag": 0.6619920663213195
+    },
+    {
+      "real": 0.49022904087620894,
+      "imag": 0.6648878425413391
+    },
+    {
+      "real": 0.4697087178339999,
+      "imag": 0.6579453929330912
+    },
+    {
+      "real": 0.46479848444337674,
+      "imag": 0.6651949385497389
+    },
+    {
+      "real": 0.4641395344317222,
+      "imag": 0.6629909660395382
+    },
+    {
+      "real": 0.42916789224122864,
+      "imag": 0.6675467169920121
+    },
+    {
+      "real": 0.4300663038220928,
+      "imag": 0.670786000062998
+    },
+    {
+      "real": 0.4057723120153066,
+      "imag": 0.6716222092913867
+    },
+    {
+      "real": 0.40336552856488855,
+      "imag": 0.6720342270275873
+    },
+    {
+      "real": 0.3935888041187203,
+      "imag": 0.683237751289811
+    },
+    {
+      "real": 0.3810743730080822,
+      "imag": 0.6837671044792876
+    },
+    {
+      "real": 0.37353920465948043,
+      "imag": 0.6797313713045764
+    },
+    {
+      "real": 0.3600406672460345,
+      "imag": 0.6819646101978991
+    },
+    {
+      "real": 0.35534681215437164,
+      "imag": 0.698552814386989
+    }
+  ],
+  "phase_concentration": [
+    0.9994967257617686,
+    0.9995434229026919,
+    0.999354162646797,
+    0.9993703811475482,
+    0.9993438566977589,
+    0.9992463733115882,
+    0.9984136771571791,
+    0.9991161745470254,
+    0.9991443357462001,
+    0.9994964489666007,
+    0.9991125403982782,
+    0.9995193809124593,
+    0.9994015946960253,
+    0.9994106261858022,
+    0.9995224621662594,
+    0.9994669614306146,
+    0.9992548242265277,
+    0.9989800286781495,
+    0.9984476569235787,
+    0.9988808739209761,
+    0.9983375913896729,
+    0.9993622669314776,
+    0.9992833313370255,
+    0.9995120932756111,
+    0.9996998437340984,
+    0.9995293388557861,
+    0.9996900560491334,
+    0.9995743224719257,
+    0.9993904617110778,
+    0.9993009657805816,
+    0.999451746392443,
+    0.9988262240235563,
+    0.9988083454491439,
+    0.9993646755693101,
+    0.9989511269767897,
+    0.9992931665979123,
+    0.9994620427295757,
+    0.9995435302029783,
+    0.9996023768146792,
+    0.9996363292515069,
+    0.9992625295521145,
+    0.9994996958778679,
+    0.9992919120550454,
+    0.999167803012466,
+    0.9975525224258006,
+    0.9981959647280878,
+    0.9983934262242448,
+    0.9991924677392992,
+    0.9990935484757525,
+    0.9996066632700122,
+    0.9992076554540369,
+    0.9996002747824109,
+    0.9994691657226376,
+    0.9997091740008294,
+    0.9991837479843306,
+    0.9990259140769757,
+    0.9990416018735686,
+    0.9988766297453341,
+    0.9984897763945366,
+    0.9988264919193904,
+    0.9991647153810294,
+    0.9994661629443032,
+    0.9994090266111758,
+    0.9993787189889177
+  ]
+}

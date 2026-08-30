@@ -1,0 +1,677 @@
+{
+  "notice": "SYNTHETIC SIMULATION — NOT HARDWARE EVIDENCE",
+  "truth_used_only_for_simulation": [
+    3.8,
+    2.8
+  ],
+  "per_receiver": {
+    "SYNTHETIC-AX3000T-A": {
+      "aoa": {
+        "quantity": "coarse_two_element_aoa_normalized_support",
+        "peak_angle_deg": 34.0,
+        "packet_count": 40,
+        "provenance": {
+          "calibration_id": "sha256:5169416622687a1688f380c8ec0411c304060ebbd27139cf244f1303dcdf54a9",
+          "capture_manifest_id": "sha256:a0d6d71ce3591e3b8a8661667f277df6b7d49a9781c8eff9c3c8abe6eb9ca451",
+          "receiver_id": "SYNTHETIC-AX3000T-A",
+          "transmitter_address": "02:00:00:00:00:01",
+          "actual_used_window": {
+            "start_host_timestamp_ns": 1800000000000000000,
+            "end_host_timestamp_ns": 1800000000195000000
+          },
+          "timebase": {
+            "id": "synthetic-shared-timebase",
+            "maximum_uncertainty_ns": 1000
+          },
+          "radio_config": {
+            "band": 1,
+            "channel_frequency_mhz": 5500,
+            "channel_bw_enum": 0,
+            "channel_bw_mhz": 20,
+            "data_bw_enum": 0,
+            "data_bw_mhz": 20,
+            "sample_count": 64,
+            "rx_mode": 4,
+            "subcarrier_spacing_hz": 312500.0,
+            "tone_mode": "stage2-type5-masked-reordered-canonical",
+            "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+            "frequency_source": "center"
+          },
+          "broadside_heading_deg": 0.0,
+          "boot_id": "SYNTHETIC-AX3000T-A-boot-1",
+          "radio_epoch": "synthetic-radio-epoch-1",
+          "driver_commit": "synthetic-stage2-commit",
+          "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "sectors": [
+          {
+            "label": "S01 -90.0..-79.4 deg",
+            "lower_deg": -90.0,
+            "upper_deg": -79.41176470588235,
+            "normalized_support": 0.06487863732976251
+          },
+          {
+            "label": "S02 -79.4..-68.8 deg",
+            "lower_deg": -79.41176470588235,
+            "upper_deg": -68.82352941176471,
+            "normalized_support": 0.05654524281261241
+          },
+          {
+            "label": "S03 -68.8..-58.2 deg",
+            "lower_deg": -68.82352941176471,
+            "upper_deg": -58.23529411764706,
+            "normalized_support": 0.047249950189971975
+          },
+          {
+            "label": "S04 -58.2..-47.6 deg",
+            "lower_deg": -58.23529411764706,
+            "upper_deg": -47.64705882352941,
+            "normalized_support": 0.036546019745959106
+          },
+          {
+            "label": "S05 -47.6..-37.1 deg",
+            "lower_deg": -47.64705882352941,
+            "upper_deg": -37.05882352941177,
+            "normalized_support": 0.027410576179462926
+          },
+          {
+            "label": "S06 -37.1..-26.5 deg",
+            "lower_deg": -37.05882352941177,
+            "upper_deg": -26.470588235294116,
+            "normalized_support": 0.022840133979553843
+          },
+          {
+            "label": "S07 -26.5..-15.9 deg",
+            "lower_deg": -26.470588235294116,
+            "upper_deg": -15.882352941176478,
+            "normalized_support": 0.020898825555575602
+          },
+          {
+            "label": "S08 -15.9..-5.3 deg",
+            "lower_deg": -15.882352941176478,
+            "upper_deg": -5.294117647058826,
+            "normalized_support": 0.025893953887101476
+          },
+          {
+            "label": "S09 -5.3..+5.3 deg",
+            "lower_deg": -5.294117647058826,
+            "upper_deg": 5.294117647058826,
+            "normalized_support": 0.03957370263214365
+          },
+          {
+            "label": "S10 +5.3..+15.9 deg",
+            "lower_deg": 5.294117647058826,
+            "upper_deg": 15.882352941176464,
+            "normalized_support": 0.06426383136350686
+          },
+          {
+            "label": "S11 +15.9..+26.5 deg",
+            "lower_deg": 15.882352941176464,
+            "upper_deg": 26.470588235294116,
+            "normalized_support": 0.09355069817044517
+          },
+          {
+            "label": "S12 +26.5..+37.1 deg",
+            "lower_deg": 26.470588235294116,
+            "upper_deg": 37.05882352941177,
+            "normalized_support": 0.11578415369645177
+          },
+          {
+            "label": "S13 +37.1..+47.6 deg",
+            "lower_deg": 37.05882352941177,
+            "upper_deg": 47.64705882352942,
+            "normalized_support": 0.10544617421298742
+          },
+          {
+            "label": "S14 +47.6..+58.2 deg",
+            "lower_deg": 47.64705882352942,
+            "upper_deg": 58.235294117647044,
+            "normalized_support": 0.08845592666128792
+          },
+          {
+            "label": "S15 +58.2..+68.8 deg",
+            "lower_deg": 58.235294117647044,
+            "upper_deg": 68.8235294117647,
+            "normalized_support": 0.0718794300599995
+          },
+          {
+            "label": "S16 +68.8..+79.4 deg",
+            "lower_deg": 68.8235294117647,
+            "upper_deg": 79.41176470588235,
+            "normalized_support": 0.06075440495393322
+          },
+          {
+            "label": "S17 +79.4..+90.0 deg",
+            "lower_deg": 79.41176470588235,
+            "upper_deg": 90.0,
+            "normalized_support": 0.058028338569244574
+          }
+        ],
+        "alias_candidates": [
+          {
+            "angle_deg": 33.85069710394865,
+            "wrap_order": 0,
+            "front_bearing_deg": 33.85069710394865,
+            "back_bearing_deg": 146.14930289605135
+          }
+        ],
+        "evidence": {
+          "score": 0.5113569107648159,
+          "flags": [
+            "single_baseline",
+            "front_back_ambiguous",
+            "coarse_sector_only",
+            "grating_lobes_possible",
+            "synthetic_calibration"
+          ],
+          "details": {
+            "pairing_quality": 0.9800000000000001,
+            "phase_coherence": 0.9991668612758693,
+            "calibration_concentration": 0.9993224112391703,
+            "support_entropy": 0.9801052912548015,
+            "packet_sample_factor": 1.0,
+            "valid_tone_count": 64,
+            "antenna_spacing_m": 0.028,
+            "center_wavelength_m": 0.05450771963636364,
+            "quality_flags_union": 32,
+            "quality_flag_names": [
+              "TONE_MASKED_REORDERED"
+            ],
+            "interpretation": "normalized support and evidence quality, not calibrated correctness probability"
+          }
+        }
+      },
+      "range_proxy": {
+        "quantity": "labeled_range_proxy",
+        "label": "far",
+        "support_weights": {
+          "near": 0.0,
+          "mid": 0.4452298487271059,
+          "far": 0.5547701512728941
+        },
+        "nearest_standardized_distance": 0.2757982077304982,
+        "model_id": "sha256:e9de0a9397fd77133fee0a3203f8d8584f0fd8bd5ecadc1754fd40f3311fcfb6",
+        "device_id": "02:00:00:00:00:01",
+        "room_id": "synthetic-room",
+        "class_distance_bands_m": {
+          "near": [
+            0.0,
+            1.5
+          ],
+          "mid": [
+            1.5,
+            3.5
+          ],
+          "far": [
+            3.5,
+            null
+          ]
+        },
+        "feature_provenance": {
+          "capture_manifest_id": "sha256:a0d6d71ce3591e3b8a8661667f277df6b7d49a9781c8eff9c3c8abe6eb9ca451",
+          "receiver_id": "SYNTHETIC-AX3000T-A",
+          "transmitter_address": "02:00:00:00:00:01",
+          "actual_used_window": {
+            "start_host_timestamp_ns": 1800000000000000000,
+            "end_host_timestamp_ns": 1800000000195000000
+          },
+          "radio_config": {
+            "band": 1,
+            "channel_frequency_mhz": 5500,
+            "channel_bw_enum": 0,
+            "channel_bw_mhz": 20,
+            "data_bw_enum": 0,
+            "data_bw_mhz": 20,
+            "sample_count": 64,
+            "rx_mode": 4,
+            "subcarrier_spacing_hz": 312500.0,
+            "tone_mode": "stage2-type5-masked-reordered-canonical",
+            "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+            "frequency_source": "center"
+          }
+        },
+        "evidence": {
+          "score": 0.4212011966547623,
+          "flags": [
+            "environment_labeled_proxy",
+            "not_tof",
+            "not_absolute_range",
+            "capture_bound_feature_window"
+          ],
+          "details": {
+            "room_id": "synthetic-room",
+            "training_room_id": "synthetic-room",
+            "device_id": "02:00:00:00:00:01",
+            "training_device_ids": [
+              "02:00:00:00:00:01"
+            ],
+            "training_source_ids": [
+              "sha256:95f075d121f818b580af1f58e35338f31edbbd0ae1ad28d45ff86d93ad8dac18"
+            ],
+            "display_band_m": [
+              3.5,
+              null
+            ],
+            "display_band_is_label_definition_not_measured_distance": true
+          }
+        }
+      },
+      "session_manifest": {
+        "schema": "ax3000t-csi-session",
+        "schema_version": 1,
+        "session_id": "SYNTHETIC-AX3000T-A-target",
+        "receiver_id": "SYNTHETIC-AX3000T-A",
+        "router_model": "SYNTHETIC AX3000T",
+        "interface": "synthetic-radio0",
+        "boot_id": "SYNTHETIC-AX3000T-A-boot-1",
+        "radio_epoch": "synthetic-radio-epoch-1",
+        "timebase": {
+          "id": "synthetic-shared-timebase",
+          "maximum_uncertainty_ns": 1000
+        },
+        "driver_commit": "synthetic-stage2-commit",
+        "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "capture": {
+          "file": "SYNTHETIC-AX3000T-A-target.synthetic.csi2f",
+          "sha256": "fa374d601e41aed93fce884b18f2df6eced7f2859f9b7ef8eb0c43f4eea3e9b9",
+          "framing": "u32-be-length+csi2-datagram",
+          "start_host_timestamp_ns": 1800000000000000000,
+          "end_host_timestamp_ns": 1800000000195000000
+        },
+        "udp": {
+          "registration_payload": "register-v2",
+          "sender_allowlist": [
+            "127.0.0.1:8888"
+          ],
+          "sequence_stats": {
+            "accepted_datagrams": 80,
+            "duplicate_datagrams": 0,
+            "out_of_order_datagrams": 0,
+            "estimated_lost_datagrams": 0,
+            "first_sequence": 0,
+            "last_sequence": 79
+          }
+        },
+        "transmitter_allowlist": [
+          "02:00:00:00:00:01"
+        ],
+        "radio_config": {
+          "band": 1,
+          "channel_frequency_mhz": 5500,
+          "channel_bw_enum": 0,
+          "channel_bw_mhz": 20,
+          "data_bw_enum": 0,
+          "data_bw_mhz": 20,
+          "sample_count": 64,
+          "rx_mode": 4,
+          "subcarrier_spacing_hz": 312500.0,
+          "tone_mode": "stage2-type5-masked-reordered-canonical",
+          "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+          "frequency_source": "center"
+        },
+        "synthetic": true,
+        "privacy_notice": "CSI includes transmitter identifiers and occupancy-correlated radio data; collect only with authorization and do not publish raw captures."
+      }
+    },
+    "SYNTHETIC-AX3000T-B": {
+      "aoa": {
+        "quantity": "coarse_two_element_aoa_normalized_support",
+        "peak_angle_deg": -53.0,
+        "packet_count": 40,
+        "provenance": {
+          "calibration_id": "sha256:4017e15c4c460f28eb27c8cca667e21eee4aa0f6a83746fa72e40ad5eeaff729",
+          "capture_manifest_id": "sha256:85969b9c4fa12e3ca3295831785474995a23ba77dc51735fd6cd6af166c9816d",
+          "receiver_id": "SYNTHETIC-AX3000T-B",
+          "transmitter_address": "02:00:00:00:00:01",
+          "actual_used_window": {
+            "start_host_timestamp_ns": 1800000000000000000,
+            "end_host_timestamp_ns": 1800000000195000000
+          },
+          "timebase": {
+            "id": "synthetic-shared-timebase",
+            "maximum_uncertainty_ns": 1000
+          },
+          "radio_config": {
+            "band": 1,
+            "channel_frequency_mhz": 5500,
+            "channel_bw_enum": 0,
+            "channel_bw_mhz": 20,
+            "data_bw_enum": 0,
+            "data_bw_mhz": 20,
+            "sample_count": 64,
+            "rx_mode": 4,
+            "subcarrier_spacing_hz": 312500.0,
+            "tone_mode": "stage2-type5-masked-reordered-canonical",
+            "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+            "frequency_source": "center"
+          },
+          "broadside_heading_deg": 180.0,
+          "boot_id": "SYNTHETIC-AX3000T-B-boot-1",
+          "radio_epoch": "synthetic-radio-epoch-1",
+          "driver_commit": "synthetic-stage2-commit",
+          "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "sectors": [
+          {
+            "label": "S01 -90.0..-79.4 deg",
+            "lower_deg": -90.0,
+            "upper_deg": -79.41176470588235,
+            "normalized_support": 0.08236693985378166
+          },
+          {
+            "label": "S02 -79.4..-68.8 deg",
+            "lower_deg": -79.41176470588235,
+            "upper_deg": -68.82352941176471,
+            "normalized_support": 0.08265413325487364
+          },
+          {
+            "label": "S03 -68.8..-58.2 deg",
+            "lower_deg": -68.82352941176471,
+            "upper_deg": -58.23529411764706,
+            "normalized_support": 0.08866467715511381
+          },
+          {
+            "label": "S04 -58.2..-47.6 deg",
+            "lower_deg": -58.23529411764706,
+            "upper_deg": -47.64705882352941,
+            "normalized_support": 0.0919529241590004
+          },
+          {
+            "label": "S05 -47.6..-37.1 deg",
+            "lower_deg": -47.64705882352941,
+            "upper_deg": -37.05882352941177,
+            "normalized_support": 0.08591903573695414
+          },
+          {
+            "label": "S06 -37.1..-26.5 deg",
+            "lower_deg": -37.05882352941177,
+            "upper_deg": -26.470588235294116,
+            "normalized_support": 0.07105587282040875
+          },
+          {
+            "label": "S07 -26.5..-15.9 deg",
+            "lower_deg": -26.470588235294116,
+            "upper_deg": -15.882352941176478,
+            "normalized_support": 0.04536919533025781
+          },
+          {
+            "label": "S08 -15.9..-5.3 deg",
+            "lower_deg": -15.882352941176478,
+            "upper_deg": -5.294117647058826,
+            "normalized_support": 0.028633291409529568
+          },
+          {
+            "label": "S09 -5.3..+5.3 deg",
+            "lower_deg": -5.294117647058826,
+            "upper_deg": 5.294117647058826,
+            "normalized_support": 0.019837949932155756
+          },
+          {
+            "label": "S10 +5.3..+15.9 deg",
+            "lower_deg": 5.294117647058826,
+            "upper_deg": 15.882352941176464,
+            "normalized_support": 0.017414295491658214
+          },
+          {
+            "label": "S11 +15.9..+26.5 deg",
+            "lower_deg": 15.882352941176464,
+            "upper_deg": 26.470588235294116,
+            "normalized_support": 0.020091870883268727
+          },
+          {
+            "label": "S12 +26.5..+37.1 deg",
+            "lower_deg": 26.470588235294116,
+            "upper_deg": 37.05882352941177,
+            "normalized_support": 0.029580482186913185
+          },
+          {
+            "label": "S13 +37.1..+47.6 deg",
+            "lower_deg": 37.05882352941177,
+            "upper_deg": 47.64705882352942,
+            "normalized_support": 0.041606792062041785
+          },
+          {
+            "label": "S14 +47.6..+58.2 deg",
+            "lower_deg": 47.64705882352942,
+            "upper_deg": 58.235294117647044,
+            "normalized_support": 0.057139682534683045
+          },
+          {
+            "label": "S15 +58.2..+68.8 deg",
+            "lower_deg": 58.235294117647044,
+            "upper_deg": 68.8235294117647,
+            "normalized_support": 0.0707159685279472
+          },
+          {
+            "label": "S16 +68.8..+79.4 deg",
+            "lower_deg": 68.8235294117647,
+            "upper_deg": 79.41176470588235,
+            "normalized_support": 0.07950975279130502
+          },
+          {
+            "label": "S17 +79.4..+90.0 deg",
+            "lower_deg": 79.41176470588235,
+            "upper_deg": 90.0,
+            "normalized_support": 0.08748713587010734
+          }
+        ],
+        "alias_candidates": [
+          {
+            "angle_deg": -52.50057418749665,
+            "wrap_order": 0,
+            "front_bearing_deg": 127.49942581250335,
+            "back_bearing_deg": 52.50057418749665
+          }
+        ],
+        "evidence": {
+          "score": 0.4891446740339751,
+          "flags": [
+            "single_baseline",
+            "front_back_ambiguous",
+            "coarse_sector_only",
+            "grating_lobes_possible",
+            "synthetic_calibration"
+          ],
+          "details": {
+            "pairing_quality": 0.9800000000000001,
+            "phase_coherence": 0.9991927534758115,
+            "calibration_concentration": 0.999257481387539,
+            "support_entropy": 0.9799151640563856,
+            "packet_sample_factor": 1.0,
+            "valid_tone_count": 64,
+            "antenna_spacing_m": 0.028,
+            "center_wavelength_m": 0.05450771963636364,
+            "quality_flags_union": 32,
+            "quality_flag_names": [
+              "TONE_MASKED_REORDERED"
+            ],
+            "interpretation": "normalized support and evidence quality, not calibrated correctness probability"
+          }
+        }
+      },
+      "range_proxy": {
+        "quantity": "labeled_range_proxy",
+        "label": "mid",
+        "support_weights": {
+          "near": 0.0,
+          "mid": 0.7604371800802378,
+          "far": 0.2395628199197622
+        },
+        "nearest_standardized_distance": 0.3794765311110981,
+        "model_id": "sha256:e9de0a9397fd77133fee0a3203f8d8584f0fd8bd5ecadc1754fd40f3311fcfb6",
+        "device_id": "02:00:00:00:00:01",
+        "room_id": "synthetic-room",
+        "class_distance_bands_m": {
+          "near": [
+            0.0,
+            1.5
+          ],
+          "mid": [
+            1.5,
+            3.5
+          ],
+          "far": [
+            3.5,
+            null
+          ]
+        },
+        "feature_provenance": {
+          "capture_manifest_id": "sha256:85969b9c4fa12e3ca3295831785474995a23ba77dc51735fd6cd6af166c9816d",
+          "receiver_id": "SYNTHETIC-AX3000T-B",
+          "transmitter_address": "02:00:00:00:00:01",
+          "actual_used_window": {
+            "start_host_timestamp_ns": 1800000000000000000,
+            "end_host_timestamp_ns": 1800000000195000000
+          },
+          "radio_config": {
+            "band": 1,
+            "channel_frequency_mhz": 5500,
+            "channel_bw_enum": 0,
+            "channel_bw_mhz": 20,
+            "data_bw_enum": 0,
+            "data_bw_mhz": 20,
+            "sample_count": 64,
+            "rx_mode": 4,
+            "subcarrier_spacing_hz": 312500.0,
+            "tone_mode": "stage2-type5-masked-reordered-canonical",
+            "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+            "frequency_source": "center"
+          }
+        },
+        "evidence": {
+          "score": 0.6885683341043091,
+          "flags": [
+            "environment_labeled_proxy",
+            "not_tof",
+            "not_absolute_range",
+            "capture_bound_feature_window"
+          ],
+          "details": {
+            "room_id": "synthetic-room",
+            "training_room_id": "synthetic-room",
+            "device_id": "02:00:00:00:00:01",
+            "training_device_ids": [
+              "02:00:00:00:00:01"
+            ],
+            "training_source_ids": [
+              "sha256:95f075d121f818b580af1f58e35338f31edbbd0ae1ad28d45ff86d93ad8dac18"
+            ],
+            "display_band_m": [
+              1.5,
+              3.5
+            ],
+            "display_band_is_label_definition_not_measured_distance": true
+          }
+        }
+      },
+      "session_manifest": {
+        "schema": "ax3000t-csi-session",
+        "schema_version": 1,
+        "session_id": "SYNTHETIC-AX3000T-B-target",
+        "receiver_id": "SYNTHETIC-AX3000T-B",
+        "router_model": "SYNTHETIC AX3000T",
+        "interface": "synthetic-radio0",
+        "boot_id": "SYNTHETIC-AX3000T-B-boot-1",
+        "radio_epoch": "synthetic-radio-epoch-1",
+        "timebase": {
+          "id": "synthetic-shared-timebase",
+          "maximum_uncertainty_ns": 1000
+        },
+        "driver_commit": "synthetic-stage2-commit",
+        "source_tree_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "capture": {
+          "file": "SYNTHETIC-AX3000T-B-target.synthetic.csi2f",
+          "sha256": "880716f0a417b2c9ad73ef2763391531ce9dcf500f5a4218a36f73a3494f78d8",
+          "framing": "u32-be-length+csi2-datagram",
+          "start_host_timestamp_ns": 1800000000000000000,
+          "end_host_timestamp_ns": 1800000000195000000
+        },
+        "udp": {
+          "registration_payload": "register-v2",
+          "sender_allowlist": [
+            "127.0.0.1:8888"
+          ],
+          "sequence_stats": {
+            "accepted_datagrams": 80,
+            "duplicate_datagrams": 0,
+            "out_of_order_datagrams": 0,
+            "estimated_lost_datagrams": 0,
+            "first_sequence": 0,
+            "last_sequence": 79
+          }
+        },
+        "transmitter_allowlist": [
+          "02:00:00:00:00:01"
+        ],
+        "radio_config": {
+          "band": 1,
+          "channel_frequency_mhz": 5500,
+          "channel_bw_enum": 0,
+          "channel_bw_mhz": 20,
+          "data_bw_enum": 0,
+          "data_bw_mhz": 20,
+          "sample_count": 64,
+          "rx_mode": 4,
+          "subcarrier_spacing_hz": 312500.0,
+          "tone_mode": "stage2-type5-masked-reordered-canonical",
+          "tone_profile": "mt76-type5-vht-csi-grid-312500hz",
+          "frequency_source": "center"
+        },
+        "synthetic": true,
+        "privacy_notice": "CSI includes transmitter identifiers and occupancy-correlated radio data; collect only with authorization and do not publish raw captures."
+      }
+    }
+  },
+  "fused_support": {
+    "quantity": "multi_receiver_2d_fused_normalized_support",
+    "display_peak_position_m": [
+      3.7600000000000002,
+      2.8000000000000003
+    ],
+    "display_covariance_m2": [
+      [
+        1.9236794026885846,
+        0.23393914058001283
+      ],
+      [
+        0.23393914058001283,
+        0.7375429639002568
+      ]
+    ],
+    "display_mass_radius_80_m": 2.0815378930012303,
+    "evidence": {
+      "score": 0.1993367809901866,
+      "flags": [
+        "normalized_support_heatmap",
+        "not_bayesian_inference",
+        "multi_receiver_geometry",
+        "front_back_components_retained",
+        "range_proxy_used",
+        "not_absolute_range",
+        "range:environment_labeled_proxy",
+        "range:not_tof",
+        "range:not_absolute_range",
+        "range:capture_bound_feature_window",
+        "diffuse_display_support"
+      ],
+      "details": {
+        "receiver_count": 2,
+        "ignored_receiver_count": 0,
+        "grid_step_m": 0.08,
+        "support_entropy": 0.925425086718571,
+        "mean_observation_quality": 0.5002507923993955,
+        "timebase_id": "synthetic-shared-timebase",
+        "maximum_clock_uncertainty_ns": 1000,
+        "minimum_proven_overlap_ns": 1000000,
+        "range_receiver_count_used": 2,
+        "range_receiver_count_ignored": 0,
+        "range_model_ids_used": [
+          "sha256:e9de0a9397fd77133fee0a3203f8d8584f0fd8bd5ecadc1754fd40f3311fcfb6",
+          "sha256:e9de0a9397fd77133fee0a3203f8d8584f0fd8bd5ecadc1754fd40f3311fcfb6"
+        ],
+        "display_mass_has_no_calibrated_coverage_semantics": true,
+        "confidence_is_not_ground_truth_accuracy": true
+      }
+    }
+  }
+}
