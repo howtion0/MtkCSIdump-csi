@@ -184,6 +184,52 @@ def main() -> int:
           {"docker_runtime_hash_check": keyring_check in dockerfile_text,
            "signed_by_on_every_source": bool(actual_apt_lines) and
            all(f"signed-by={keyring_file}" in line for line in actual_apt_lines)})
+    ca_bootstrap = builder.get("ca_bootstrap", {})
+    ca_url = str(ca_bootstrap.get("url") or "")
+    ca_sha256 = str(ca_bootstrap.get("sha256") or "")
+    ca_sha512 = str(ca_bootstrap.get("sha512") or "")
+    ca_bytes = ca_bootstrap.get("bytes")
+    ca_count = ca_bootstrap.get("certificate_count")
+    ca_bundle_sha256 = str(ca_bootstrap.get("bundle_sha256") or "")
+    ca_path = "/tmp/ca-certificates-bootstrap.deb"
+    ca_add = f"ADD --checksum=sha256:{ca_sha256} \\\n    {ca_url} \\\n    {ca_path}"
+    check(gates, "builder.ca_bootstrap.package_lock",
+          ca_bootstrap.get("package") == "ca-certificates" and
+          ca_bootstrap.get("version") == "20260601~22.04.1" and
+          ca_url.startswith(f"{snapshot_uri}/pool/main/c/ca-certificates/") and
+          re.fullmatch(r"[0-9a-f]{64}", ca_sha256) is not None and
+          re.fullmatch(r"[0-9a-f]{128}", ca_sha512) is not None and
+          ca_bytes == 140666 and ca_add in dockerfile_text and
+          f'{ca_sha256}  {ca_path}' in dockerfile_text and
+          f'{ca_sha512}  {ca_path}' in dockerfile_text and
+          f'test "$(wc -c < {ca_path})" -eq {ca_bytes}' in dockerfile_text,
+          {"package": "ca-certificates", "version": "20260601~22.04.1",
+           "url_prefix": f"{snapshot_uri}/pool/main/c/ca-certificates/",
+           "bytes": 140666, "sha256": ca_sha256, "sha512": ca_sha512},
+          {"add_checksum": ca_add in dockerfile_text,
+           "runtime_sha256": f'{ca_sha256}  {ca_path}' in dockerfile_text,
+           "runtime_sha512": f'{ca_sha512}  {ca_path}' in dockerfile_text,
+           "runtime_bytes": f'test "$(wc -c < {ca_path})" -eq {ca_bytes}' in
+           dockerfile_text})
+    check(gates, "builder.ca_bootstrap.bundle_lock",
+          ca_count == 121 and
+          re.fullmatch(r"[0-9a-f]{64}", ca_bundle_sha256) is not None and
+          f"-eq {ca_count}" in dockerfile_text and
+          f'{ca_bundle_sha256}  /etc/ssl/certs/ca-certificates.crt' in
+          dockerfile_text,
+          {"certificate_count": 121, "bundle_sha256": ca_bundle_sha256},
+          {"count_check": f"-eq {ca_count}" in dockerfile_text,
+           "bundle_hash_check":
+           f'{ca_bundle_sha256}  /etc/ssl/certs/ca-certificates.crt' in
+           dockerfile_text})
+    check(gates, "builder.ca_bootstrap.tls_enforced",
+          "http://snapshot.ubuntu.com" not in dockerfile_text and
+          "Acquire::https::Verify-Peer" not in dockerfile_text and
+          "Acquire::https::Verify-Host" not in dockerfile_text and
+          "--no-check-certificate" not in dockerfile_text,
+          "HTTPS snapshot with normal TLS peer/host verification",
+          "no insecure TLS override" if "Verify-Peer" not in dockerfile_text else
+          "insecure override present")
     check(gates, "builder.apt_sources.copy",
           "COPY apt-sources.list /etc/apt/sources.list" in dockerfile_text,
           "COPY apt-sources.list /etc/apt/sources.list",

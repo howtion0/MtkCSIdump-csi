@@ -446,6 +446,8 @@ gate = json.loads((out / "gate-report.json").read_text())
 def h(path):
     x=hashlib.sha256(); x.update(path.read_bytes()); return x.hexdigest()
 stage = Path(sys.argv[3])
+source_lock = json.loads((stage / "source-lock.json").read_text())
+builder_lock = source_lock["builder"]
 tooling_files = (
     ".gitignore", "README.md", "BUILD.md", "PUBLIC-VS-PRIVATE.md", "RECOVERY.md", "RELEASE.md",
     "build-config.seed", "manifest.template.json", "source-lock.json", "verify_image.py",
@@ -494,9 +496,10 @@ provenance = {
         "image_id": sys.argv[7],
         "jobs": int(sys.argv[9]),
         "source_date_epoch": int(sys.argv[2]),
-        "apt_snapshot": "20260830T000000Z",
-        "apt_snapshot_uri": "https://snapshot.ubuntu.com/ubuntu/20260830T000000Z",
-        "apt_archive_keyring_sha256": "1a4dd63e5c76728960a2edddae22e2e0fc53df8e8b87806deb971030ac704eb0",
+        "apt_snapshot": builder_lock["apt_snapshot"],
+        "apt_snapshot_uri": builder_lock["apt_snapshot_uri"],
+        "apt_archive_keyring_sha256": builder_lock["apt_archive_keyring_sha256"],
+        "ca_bootstrap": builder_lock["ca_bootstrap"],
         "dockerfile_sha256": h(stage / "container/Dockerfile"),
         "apt_sources_sha256": h(stage / "container/apt-sources.list"),
         "package_versions_sha256": h(out / "builder-packages.txt"),

@@ -49,6 +49,31 @@ class BuilderSnapshotLockTest(unittest.TestCase):
         from_lines = re.findall(r"(?m)^FROM\s+(\S+)\s*$", self.dockerfile)
         self.assertEqual(from_lines, [self.lock["base_digest"]])
 
+    def test_ca_bootstrap_is_exact_and_never_disables_tls_checks(self) -> None:
+        bootstrap = self.lock["ca_bootstrap"]
+        path = "/tmp/ca-certificates-bootstrap.deb"
+        self.assertEqual(bootstrap["package"], "ca-certificates")
+        self.assertEqual(bootstrap["version"], "20260601~22.04.1")
+        self.assertEqual(bootstrap["bytes"], 140666)
+        self.assertEqual(bootstrap["certificate_count"], 121)
+        self.assertIn(
+            f"ADD --checksum=sha256:{bootstrap['sha256']} \\\n"
+            f"    {bootstrap['url']} \\\n"
+            f"    {path}",
+            self.dockerfile,
+        )
+        self.assertIn(f"{bootstrap['sha256']}  {path}", self.dockerfile)
+        self.assertIn(f"{bootstrap['sha512']}  {path}", self.dockerfile)
+        self.assertIn(
+            f"{bootstrap['bundle_sha256']}  /etc/ssl/certs/ca-certificates.crt",
+            self.dockerfile,
+        )
+        for forbidden in (
+            "http://snapshot.ubuntu.com", "Acquire::https::Verify-Peer",
+            "Acquire::https::Verify-Host", "--no-check-certificate",
+        ):
+            self.assertNotIn(forbidden, self.dockerfile)
+
     def test_runtime_uses_inspected_image_id_and_fresh_owned_volume(self) -> None:
         runner_lines = self.runner.splitlines()
         inspect_line = next(

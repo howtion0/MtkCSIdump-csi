@@ -11,7 +11,13 @@ base is locked by digest in `source-lock.json`. Its APT sources are locked to
 the direct Ubuntu snapshot URI ending in `20260830T000000Z`; all four suites
 use only that HTTPS origin, disable expiry for historical replay, and name the
 base image's exact hash-gated Ubuntu archive keyring with `signed-by`. Both the
-exact sources file and Dockerfile are hash-gated, and
+exact sources file and Dockerfile are hash-gated. Because the minimal base has
+no CA bundle, BuildKit first fetches the exact snapshot
+`ca-certificates_20260601~22.04.1_all.deb` under an `ADD --checksum` SHA-256
+gate, extracts only its 121 public Mozilla certificates, and verifies the
+deterministic bundle hash before the first APT request. APT therefore retains
+normal TLS peer/host verification; no host/VPN/private CA and no insecure APT
+bootstrap are used. Then
 `SOURCE_DATE_EPOCH=1782770622` fixes builder/image build timestamps. Provenance
 embeds those identities plus the complete installed package/version list. The
 wrapper requires at least

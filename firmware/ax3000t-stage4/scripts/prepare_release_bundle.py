@@ -139,6 +139,8 @@ SOURCE_COMMON_GATE_NAMES = frozenset({
     "build.overlay.no_third_party_repo", "builder.dockerfile.sha256", "builder.base_digest",
     "builder.source_date_epoch", "builder.apt_sources.sha256", "builder.apt_snapshot",
     "builder.apt_snapshot.direct_uri", "builder.apt_archive_keyring.lock",
+    "builder.ca_bootstrap.package_lock", "builder.ca_bootstrap.bundle_lock",
+    "builder.ca_bootstrap.tls_enforced",
     "builder.apt_sources.copy",
     "signing_tools.usign.commit", "signing_tools.usign.mirror_hash",
     "signing_tools.ucert.commit", "signing_tools.ucert.mirror_hash",
@@ -505,6 +507,7 @@ def main() -> int:
                 builder.get("apt_snapshot_uri") != builder_lock.get("apt_snapshot_uri") or
                 builder.get("apt_archive_keyring_sha256") !=
                 builder_lock.get("apt_archive_keyring_sha256") or
+                builder.get("ca_bootstrap") != builder_lock.get("ca_bootstrap") or
                 builder.get("dockerfile_sha256") != builder_lock.get("dockerfile_sha256") or
                 builder.get("apt_sources_sha256") != builder_lock.get("apt_sources_sha256")):
             raise ValueError("provenance builder snapshot/tooling identity differs from source lock")
