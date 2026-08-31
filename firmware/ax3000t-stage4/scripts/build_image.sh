@@ -21,6 +21,21 @@ CAPTURE_ARCHIVE_BYTES="14026970"
 CAPTURE_ARCHIVE_SHA256="6f02ffbe03a1f5aaa491d1c32babad3595263356ac406f9cc38f64608a835a18"
 SOURCE_DATE_EPOCH="1782770622"
 JOBS="${JOBS:-2}"
+PREPARE_DOWNLOAD_TARGETS=(
+  "tools/lz4/download"
+  "package/kernel/bpf-headers/download"
+  "package/libs/argp-standalone/download"
+  "package/libs/libmd/download"
+  "package/libs/libpcap/download"
+  "package/libs/libselinux/download"
+  "package/libs/libsepol/download"
+  "package/libs/ncurses/download"
+  "package/libs/pcre2/download"
+  "package/network/utils/resolveip/download"
+  "package/system/ucert/download"
+  "package/utils/lua/download"
+  "package/utils/util-linux/download"
+)
 STAGE4_SOURCE_COMMIT="${STAGE4_SOURCE_COMMIT:-}"
 STAGE4_SOURCE_TREE="${STAGE4_SOURCE_TREE:-}"
 STAGE4_SOURCE_ARCHIVE_SHA256="${STAGE4_SOURCE_ARCHIVE_SHA256:-}"
@@ -150,6 +165,27 @@ require_disk_space() {
   fi
 }
 
+verify_lua_serial_artifacts() {
+  local context="$1"
+  mapfile -t LUA_SOURCE_DIRS < <(find "$OPENWRT/build_dir" -type d \
+    -path '*/lua-5.1.5/src' | sort)
+  [[ ${#LUA_SOURCE_DIRS[@]} -eq 1 ]] || {
+    printf '%s: expected one Lua 5.1.5 source directory, found %s\n' \
+      "$context" "${#LUA_SOURCE_DIRS[@]}" >&2
+    exit 1
+  }
+  if find "${LUA_SOURCE_DIRS[0]}" -maxdepth 1 -type f -name '*.o' -size 0 \
+      -print -quit | grep -q .; then
+    printf '%s: Lua serial prerequisite left a zero-byte object\n' "$context" >&2
+    exit 1
+  fi
+  [[ -s "${LUA_SOURCE_DIRS[0]}/liblua.so.5.1.5" ]] || {
+    printf '%s: Lua serial prerequisite did not produce non-empty liblua.so.5.1.5\n' \
+      "$context" >&2
+    exit 1
+  }
+}
+
 if [[ "$PHASE" == prepare ]]; then
 echo "[1/11] Fetching exact public revisions" | tee "$LOG"
 require_disk_space
@@ -226,6 +262,8 @@ grep -qx 'CONFIG_PACKAGE_kmod-mt7915e=y' "$OPENWRT/.config"
 grep -qx 'CONFIG_PACKAGE_mtkcsi-dump=y' "$OPENWRT/.config"
 grep -qx 'CONFIG_KERNEL_BUILD_USER="builder"' "$OPENWRT/.config"
 grep -qx 'CONFIG_KERNEL_BUILD_DOMAIN="buildhost"' "$OPENWRT/.config"
+grep -qx '# CONFIG_BUILD_ALL_HOST_TOOLS is not set' "$OPENWRT/.config"
+grep -qx '# CONFIG_TARGET_INITRAMFS_COMPRESSION_LZ4 is not set' "$OPENWRT/.config"
 grep -qx '# CONFIG_USE_APK is not set' "$OPENWRT/.config"
 ! grep -q '^CONFIG_USE_APK=y$' "$OPENWRT/.config"
 grep -qx 'CONFIG_SIGNED_PACKAGES=y' "$OPENWRT/.config"
@@ -297,6 +335,11 @@ python3 "$STAGE_DIR/scripts/verify_capture_archive.py" \
   --zstd /usr/bin/zstd \
   --output "$WORK_DIR/capture-source-preseed-gates.json" | tee -a "$LOG"
 "${MAKE[@]}" -j"$JOBS" download 2>&1 | tee -a "$LOG"
+for prepare_download_target in "${PREPARE_DOWNLOAD_TARGETS[@]}"; do
+  printf '[networked-prepare] exact download target: %s\n' \
+    "$prepare_download_target" | tee -a "$LOG"
+  "${MAKE[@]}" -j1 "$prepare_download_target" 2>&1 | tee -a "$LOG"
+done
 if find "$OPENWRT/dl" -type f -size -1024c -print -quit | grep -q .; then
   echo "a suspiciously short download remains in dl/" >&2
   exit 1
@@ -310,14 +353,24 @@ python3 "$STAGE_DIR/scripts/verify_capture_archive.py" \
 
 python3 "$STAGE_DIR/scripts/download_closure.py" create \
   --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" | tee -a "$LOG"
+python3 "$STAGE_DIR/scripts/download_closure.py" verify \
+  --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" \
+  --lock "$STAGE_DIR/source-lock.json" | tee -a "$LOG"
 python3 - "$WORK_DIR/.stage4-prepared.json" "$STAGE4_SOURCE_COMMIT" \
   "$STAGE4_SOURCE_TREE" "$STAGE4_SOURCE_ARCHIVE_SHA256" \
   "$BUILDER_IMAGE_ID" "$BUILDER_BASE_DIGEST" "$OPENWRT_COMMIT" "$KWRT_COMMIT" \
-  "$WORK_DIR/final.config" "$WORK_DIR/download-closure.json" <<'PY'
+  "$WORK_DIR/final.config" "$WORK_DIR/download-closure.json" \
+  "$STAGE_DIR/source-lock.json" <<'PY'
 import hashlib, json, sys
 from pathlib import Path
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+download_manifest_sha256 = digest(sys.argv[10])
+locked_download_manifest_sha256 = json.loads(
+    Path(sys.argv[11]).read_text()
+)["builder"]["download_closure"]["manifest_sha256"]
+if download_manifest_sha256 != locked_download_manifest_sha256:
+    raise SystemExit("download manifest differs from the locked closure before receipt creation")
 marker = {
     "schema": 1,
     "phase": "networked-prepare-complete",
@@ -329,7 +382,7 @@ marker = {
     "openwrt_commit": sys.argv[7],
     "kwrt_commit": sys.argv[8],
     "final_config_sha256": digest(sys.argv[9]),
-    "download_manifest_sha256": digest(sys.argv[10]),
+    "download_manifest_sha256": download_manifest_sha256,
 }
 Path(sys.argv[1]).write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n")
 PY
@@ -369,13 +422,20 @@ if marker != expected:
     raise SystemExit("prepared phase marker does not match this clean source/builder/config/download set")
 PY
 python3 "$STAGE_DIR/scripts/download_closure.py" verify \
-  --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" | tee -a "$LOG"
+  --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" \
+  --lock "$STAGE_DIR/source-lock.json" | tee -a "$LOG"
 printf '%s\n' '[offline-build] prepared source/download closure verified' | tee -a "$LOG"
 
-echo "[6/11] Building and rejecting/accepting the vanilla Kwrt ABI control" | tee -a "$LOG"
+echo "[6/11] Preparing the locked OpenWrt graph and verifying the vanilla Kwrt ABI control" | tee -a "$LOG"
 require_disk_space
-"${MAKE[@]}" -j"$JOBS" package/system/usign/host/compile package/system/ucert/host/compile \
-  2>&1 | tee -a "$LOG"
+"${MAKE[@]}" -j"$JOBS" prepare 2>&1 | tee -a "$LOG"
+python3 "$STAGE_DIR/scripts/download_closure.py" verify \
+  --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" \
+  --lock "$STAGE_DIR/source-lock.json" | tee -a "$LOG"
+printf '%s\n' '[offline-build] OpenWrt prepare completed without changing the download closure' | \
+  tee -a "$LOG"
+"${MAKE[@]}" -j"$JOBS" package/system/usign/host/compile 2>&1 | tee -a "$LOG"
+"${MAKE[@]}" -j"$JOBS" package/system/ucert/host/compile 2>&1 | tee -a "$LOG"
 USIGN_HOST="$OPENWRT/staging_dir/host/bin/usign"
 UCERT_HOST="$OPENWRT/staging_dir/host/bin/ucert"
 [[ -x "$USIGN_HOST" && -x "$UCERT_HOST" ]] || { echo "host usign/ucert tools are missing" >&2; exit 1; }
@@ -386,7 +446,9 @@ if [[ "$PUBLIC_FINGERPRINT" != "$LOCKED_FINGERPRINT" || "$PRIVATE_FINGERPRINT" !
   echo "external private key, pinned public key, and locked fingerprint do not match" >&2
   exit 1
 fi
-"${MAKE[@]}" -j"$JOBS" package/kernel/mt76/compile 2>&1 | tee -a "$LOG"
+"${MAKE[@]}" -j1 package/utils/lua/compile 2>&1 | tee -a "$LOG"
+verify_lua_serial_artifacts "before vanilla mt76"
+"${MAKE[@]}" -j1 package/kernel/mt76/compile 2>&1 | tee -a "$LOG"
 mapfile -t VANILLA_MODULES < <(find "$OPENWRT/build_dir" -type f \
   -path '*/ipkg-*/kmod-mt7915e/lib/modules/*/mt7915e.ko' | sort)
 mapfile -t VANILLA_IPKS < <(find "$OPENWRT/bin" -type f \
@@ -419,6 +481,7 @@ if ! "${MAKE[@]}" -j"$JOBS" 2>&1 | tee -a "$LOG"; then
   echo "parallel build failed; preserving work tree and retrying serially for diagnostics" | tee -a "$LOG"
   "${MAKE[@]}" -j1 V=s 2>&1 | tee -a "$LOG"
 fi
+verify_lua_serial_artifacts "after final image build"
 
 TARGET_OUT="$OPENWRT/bin/targets/mediatek/filogic"
 mapfile -t IMAGES < <(find "$TARGET_OUT" -maxdepth 1 -type f \
@@ -610,6 +673,10 @@ provenance = {
     "this_module_section_size": "0x440",
     "vanilla_undefined_symbols_count": 294,
     "vanilla_undefined_symbols_sha256": "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb",
+    "vanilla_module": {
+        "bytes": gate["artifacts"]["mt7915e_vanilla_module"]["bytes"],
+        "sha256": gate["artifacts"]["mt7915e_vanilla_module"]["sha256"],
+    },
     "source_lock_sha256": h(out / "source-lock.json"),
     "kwrt_exact_config_sha256": h(out / "kwrt-exact.config"),
     "build_config_sha256": h(out / "build.config"),

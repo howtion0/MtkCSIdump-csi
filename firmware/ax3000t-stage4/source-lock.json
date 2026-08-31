@@ -52,6 +52,58 @@
     },
     "dockerfile": "container/Dockerfile",
     "dockerfile_sha256": "cc851cf003cbac2e9b762cc841921d49e087bf69a6fcb94298bc115d352e99eb",
+    "prepare_download_targets": [
+      "tools/lz4/download",
+      "package/kernel/bpf-headers/download",
+      "package/libs/argp-standalone/download",
+      "package/libs/libmd/download",
+      "package/libs/libpcap/download",
+      "package/libs/libselinux/download",
+      "package/libs/libsepol/download",
+      "package/libs/ncurses/download",
+      "package/libs/pcre2/download",
+      "package/network/utils/resolveip/download",
+      "package/system/ucert/download",
+      "package/utils/lua/download",
+      "package/utils/util-linux/download"
+    ],
+    "offline_prepare_target": "prepare",
+    "prepare_dependency_closure": {
+      "method": "normalized-gnu-make-database",
+      "tools_compile_direct_count": 53,
+      "tools_compile_transitive_only": [
+        "tools/lz4/compile"
+      ],
+      "required_tool_download_targets": [
+        "tools/lz4/download"
+      ],
+      "host_download_aliases_rejected": [
+        "package/libs/ncurses/host/download",
+        "package/system/ucert/host/download"
+      ],
+      "canonical_host_source_targets": [
+        "package/libs/ncurses/download",
+        "package/system/ucert/download"
+      ]
+    },
+    "download_closure": {
+      "schema": 1,
+      "directories": 1,
+      "files": 132,
+      "manifest_sha256": "fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c"
+    },
+    "serial_package_prerequisites": [
+      {
+        "target": "package/utils/lua/compile",
+        "jobs": 1,
+        "reason": "Lua 5.1 package compilation can leave zero-byte objects under inherited parallelism"
+      }
+    ],
+    "vanilla_mt76_compile": {
+      "target": "package/kernel/mt76/compile",
+      "jobs": 1,
+      "reason": "The direct ABI-control goal expands selected network dependencies that race under parallel package compilation"
+    },
     "default_jobs": 2,
     "maximum_jobs": 6,
     "minimum_free_space_gib": 25
@@ -130,6 +182,10 @@
     "module_bytes": 218088,
     "module_sha256": "346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621",
     "modversions": false
+  },
+  "canonical_builder_vanilla": {
+    "module_bytes": 217976,
+    "module_sha256": "e9eb76d14a51257e6d50aa8c50a1b6c97351e3395595ed243bc0c7d2033e9309"
   },
   "patched_abi_expectation": {
     "undefined_symbols_count": 297,

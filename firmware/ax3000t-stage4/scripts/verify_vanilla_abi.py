@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail fast unless a vanilla mt7915e rebuild matches the live Kwrt ABI."""
+"""Require the live Kwrt ABI and exact canonical Stage4 vanilla bytes."""
 
 from __future__ import annotations
 

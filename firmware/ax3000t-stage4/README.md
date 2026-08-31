@@ -65,7 +65,7 @@ The complete machine-readable lock is in `source-lock.json`.
   first-boot script that changes a preserved user radio configuration;
 - IPK signature checking enabled, with only a guaranteed-nonexistent local
   package feed (`file:///nonexistent/...`) because no compatible public package
-repository exists for this custom kernel ABI.
+  repository exists for this custom kernel ABI.
 
 The same locked `b8d7b73…` Git tree is carried in the canonical OpenWrt rawgit
 `.tar.zst` (not GitHub's mutable codeload gzip bytes). A Stage4 materializer
@@ -99,8 +99,15 @@ outputs:
 5. FIT-selected/decompressed ARM64 Linux 6.12.94 with the fixed
    `builder@buildhost` identity, final kernel config, `Module.symvers`,
    vermagic, dependency set and package manifest;
-6. a vanilla control built first that is byte-identical to the 218,088-byte
-   public/live baseline, with `0x440`, 294 undefined symbols, and locked hashes;
+6. a vanilla control built first that exactly matches the canonical Stage4
+   builder fingerprint: 217,976 bytes, SHA-256
+   `e9eb76d14a51257e6d50aa8c50a1b6c97351e3395595ed243bc0c7d2033e9309`,
+   `0x440`, and 294 undefined symbols. The separate 218,088-byte public/live
+   reference remains locked at SHA-256
+   `346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621`.
+   A section/string/relocation comparison found exactly one semantic-neutral
+   difference: the `ASSERT_RTNL()` `__FILE__` path in `.rodata.str1.8`; the
+   code, data, ABI, dependency set and undefined-symbol identity are unchanged;
 7. both vanilla and CSI modules packaged as IPK with the exact kernel
    dependency; APK is rejected;
 8. the module inside the final rootfs is byte-identical to the audited module;
@@ -110,11 +117,27 @@ outputs:
 11. extracted-rootfs scans for credentials, MAC addresses, private keys,
     device dumps and embedded archives, plus signed/offline feed and neutral
     release-branding gates;
-12. the networked source-download phase is hash-closed before a separate
-    `--network=none` build phase; provenance embeds the builder package list;
-13. two independent fresh-volume builds are byte-identical for the image,
+12. the networked source-download phase serially prefetches 13 locked
+    compile-reachable targets (including OpenWrt's otherwise omitted host-tool
+    `lz4` dependency), rejects short files, and creates the exact canonical
+    download closure: schema 1, one directory, 132 files, manifest SHA-256
+    `fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c`.
+    It immediately verifies that new manifest against `source-lock.json` while
+    networking is still available. The separate `--network=none` phase verifies
+    it before and after top-level `make prepare`, for three locked verifications
+    in total. The network receipt, provenance and Release bundler all cross-bind
+    this same closure identity;
+13. before vanilla mt76, the offline phase builds
+    `package/utils/lua/compile` serially with `-j1`, rejects any zero-byte
+    `*.o`, and requires a non-empty `liblua.so.5.1.5`. The entire vanilla
+    `package/kernel/mt76/compile` ABI-control goal also runs with `-j1`: that
+    goal expands selected network-package dependencies, and parallel runs were
+    observed to race in Lua, netifd and hostapd. After the final image build,
+    the Lua artifact gate runs again, still rejecting zero-byte objects and
+    requiring the non-empty shared library;
+14. two independent fresh-volume builds are byte-identical for the image,
     modules, packages, configs, reports and public signing inputs;
-14. provenance cross-binds the image, every report, signature identity, builder,
+15. provenance cross-binds the image, every report, signature identity, builder,
     tooling files, reproducibility report and clean Stage4 source commit.
 
 See [BUILD.md](BUILD.md) for reproduction, [RELEASE.md](RELEASE.md) for the

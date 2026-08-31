@@ -12,13 +12,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
-import shutil
+import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 from compare_repro_builds import COMPARE_FILES as REPRO_COMPARE_FILES
+from download_closure import load_download_lock, load_manifest_with_bytes
 
 
 IMAGE = "ax3000t-112m-csi-25.12.5-experimental-sysupgrade.bin"
@@ -114,7 +117,7 @@ FINAL_GATE_NAMES = frozenset({
     "module.patched.undefined_symbols", "module.patched.csi_present",
     "module.baseline.architecture", "module.baseline.this_module_size",
     "module.baseline.vermagic", "module.baseline.dependencies", "module.baseline.no_modversions",
-    "module.baseline.byte_identity", "module.baseline.undefined_symbols",
+    "module.vanilla.canonical_builder_fingerprint", "module.baseline.undefined_symbols",
     "module.baseline.no_csi", "module.patched.exact_symbol_delta",
     "kmod.patched.kernel_dependency", "kmod.patched.identity", "kmod.patched.module_identity",
     "kmod.baseline.kernel_dependency", "kmod.baseline.identity", "kmod.baseline.module_identity",
@@ -142,6 +145,9 @@ SOURCE_COMMON_GATE_NAMES = frozenset({
     "builder.ca_bootstrap.package_lock", "builder.ca_bootstrap.bundle_lock",
     "builder.ca_bootstrap.tls_enforced",
     "builder.apt_sources.copy",
+    "builder.download_closure.prepare_targets", "builder.offline.prepare_order",
+    "builder.prepare_dependency_closure", "builder.download_closure.identity",
+    "builder.package_parallelism.lua", "builder.package_parallelism.vanilla_mt76",
     "signing_tools.usign.commit", "signing_tools.usign.mirror_hash",
     "signing_tools.ucert.commit", "signing_tools.ucert.mirror_hash",
     "signing.status.ready", "signing.public_key.sha256", "signing.base_ucert.sha256",
@@ -193,7 +199,7 @@ CAPTURE_GATE_NAMES = frozenset({
 VANILLA_GATE_NAMES = frozenset({
     "module.baseline.architecture", "module.baseline.this_module_size",
     "module.baseline.vermagic", "module.baseline.dependencies", "module.baseline.no_modversions",
-    "module.baseline.byte_identity", "module.baseline.undefined_symbols",
+    "module.vanilla.canonical_builder_fingerprint", "module.baseline.undefined_symbols",
     "module.baseline.no_csi", "kmod.baseline.kernel_dependency", "kmod.baseline.identity",
     "kmod.baseline.module_identity",
 })
@@ -252,6 +258,248 @@ def sha256(path: Path) -> str:
 
 def is_regular_file(path: Path) -> bool:
     return path.is_file() and not path.is_symlink()
+
+
+def snapshot_build_outputs(source: Path, names: set[str]) -> tuple[Any, Path, dict[str, dict[str, Any]]]:
+    """Copy all build outputs once through a stable no-follow directory handle.
+
+    Every later semantic/hash/copy check uses this private snapshot, never a
+    pathname that another local process can swap between validation steps.
+    """
+    owner = tempfile.TemporaryDirectory(prefix="ax3000t-stage4-release-inputs-")
+    snapshot = Path(owner.name)
+    directory_flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+                       getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        directory_fd = os.open(source, directory_flags)
+    except OSError as exc:
+        owner.cleanup()
+        raise ValueError("cannot safely open the build-output directory") from exc
+    try:
+        directory_before = os.fstat(directory_fd)
+        if not stat.S_ISDIR(directory_before.st_mode):
+            raise ValueError("build output is not a stable directory")
+        identities: dict[str, dict[str, Any]] = {}
+        for name in sorted(names, key=os.fsencode):
+            if Path(name).name != name or name in {".", ".."}:
+                raise ValueError(f"unsafe release input name: {name!r}")
+            source_flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+                            getattr(os, "O_NOFOLLOW", 0))
+            try:
+                source_fd = os.open(name, source_flags, dir_fd=directory_fd)
+            except OSError as exc:
+                raise ValueError(f"cannot safely open release input: {name}") from exc
+            destination = snapshot / name
+            destination_flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                                 getattr(os, "O_CLOEXEC", 0) |
+                                 getattr(os, "O_NOFOLLOW", 0))
+            destination_fd = -1
+            try:
+                before = os.fstat(source_fd)
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError(f"release input is not a regular file: {name}")
+                destination_fd = os.open(destination, destination_flags, 0o600)
+                value = hashlib.sha256()
+                byte_count = 0
+                while True:
+                    block = os.read(source_fd, 1024 * 1024)
+                    if not block:
+                        break
+                    value.update(block)
+                    byte_count += len(block)
+                    view = memoryview(block)
+                    while view:
+                        written = os.write(destination_fd, view)
+                        if written <= 0:
+                            raise OSError("short write while snapshotting release input")
+                        view = view[written:]
+                os.fsync(destination_fd)
+                after = os.fstat(source_fd)
+                stable_fields = (
+                    "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns",
+                )
+                if any(getattr(before, field) != getattr(after, field)
+                       for field in stable_fields):
+                    raise ValueError(f"release input changed while snapshotting: {name}")
+                if byte_count != before.st_size:
+                    raise ValueError(f"release input size changed while snapshotting: {name}")
+                identities[name] = {
+                    "bytes": byte_count,
+                    "sha256": value.hexdigest(),
+                }
+            finally:
+                os.close(source_fd)
+                if destination_fd >= 0:
+                    os.close(destination_fd)
+        directory_after = os.fstat(directory_fd)
+        stable_directory_fields = (
+            "st_dev", "st_ino", "st_mode", "st_mtime_ns", "st_ctime_ns",
+        )
+        if any(getattr(directory_before, field) != getattr(directory_after, field)
+               for field in stable_directory_fields):
+            raise ValueError("build-output directory changed while inputs were snapshotted")
+    except Exception:
+        owner.cleanup()
+        raise
+    finally:
+        os.close(directory_fd)
+    return owner, snapshot, identities
+
+
+def write_release_bundle(source: Path, bundle: Path, names: tuple[str, ...],
+                         expected: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Write the exact bundle through stable directory FDs without following links."""
+    if Path(bundle.name).name != bundle.name or bundle.name in {".", ".."}:
+        raise ValueError("unsafe release bundle directory name")
+    if set(expected) != set(names):
+        raise ValueError("release asset identity cache differs from the exact allowlist")
+    directory_flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+                       getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        parent_fd = os.open(bundle.parent, directory_flags)
+    except OSError as exc:
+        raise ValueError("release bundle parent must be an existing regular directory") from exc
+    bundle_fd = -1
+    source_fd = -1
+    try:
+        try:
+            os.mkdir(bundle.name, 0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        try:
+            bundle_fd = os.open(bundle.name, directory_flags, dir_fd=parent_fd)
+        except OSError as exc:
+            raise ValueError("release bundle path is not a safe directory") from exc
+        opened_bundle = os.fstat(bundle_fd)
+        bundle_entry = os.stat(bundle.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (not stat.S_ISDIR(opened_bundle.st_mode) or
+                opened_bundle.st_dev != bundle_entry.st_dev or
+                opened_bundle.st_ino != bundle_entry.st_ino):
+            raise ValueError("release bundle directory changed while it was opened")
+        with os.scandir(bundle_fd) as iterator:
+            existing = [entry.name for entry in iterator]
+        if existing:
+            raise ValueError("bundle directory must be new or empty")
+        parent_stable = os.fstat(parent_fd)
+
+        source_fd = os.open(source, directory_flags)
+        copied: dict[str, dict[str, Any]] = {}
+        for name in names:
+            if Path(name).name != name or name in {".", ".."}:
+                raise ValueError(f"unsafe release asset name: {name!r}")
+            read_flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) |
+                          getattr(os, "O_NOFOLLOW", 0))
+            write_flags = (os.O_RDWR | os.O_CREAT | os.O_EXCL |
+                           getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                input_fd = os.open(name, read_flags, dir_fd=source_fd)
+            except OSError as exc:
+                raise ValueError(f"cannot safely reopen snapshotted asset: {name}") from exc
+            output_fd = -1
+            value = hashlib.sha256()
+            byte_count = 0
+            try:
+                input_before = os.fstat(input_fd)
+                if not stat.S_ISREG(input_before.st_mode):
+                    raise ValueError(f"snapshotted release asset is not regular: {name}")
+                try:
+                    output_fd = os.open(name, write_flags, 0o644, dir_fd=bundle_fd)
+                except OSError as exc:
+                    raise ValueError(f"refusing unsafe or pre-existing release asset: {name}") from exc
+                while True:
+                    block = os.read(input_fd, 1024 * 1024)
+                    if not block:
+                        break
+                    value.update(block)
+                    byte_count += len(block)
+                    view = memoryview(block)
+                    while view:
+                        written = os.write(output_fd, view)
+                        if written <= 0:
+                            raise OSError("short write while creating release asset")
+                        view = view[written:]
+                os.fsync(output_fd)
+                input_after = os.fstat(input_fd)
+                stable_file_fields = (
+                    "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns",
+                )
+                if any(getattr(input_before, field) != getattr(input_after, field)
+                       for field in stable_file_fields):
+                    raise ValueError(f"snapshotted release asset changed while copying: {name}")
+                input_digest = value.hexdigest()
+                if expected[name] != {"bytes": byte_count, "sha256": input_digest}:
+                    raise ValueError(f"snapshotted release asset differs from initial input: {name}")
+                output_before_read = os.fstat(output_fd)
+                if (not stat.S_ISREG(output_before_read.st_mode) or
+                        output_before_read.st_size != byte_count):
+                    raise ValueError(f"copied release asset identity is invalid: {name}")
+                os.lseek(output_fd, 0, os.SEEK_SET)
+                output_value = hashlib.sha256()
+                output_bytes = 0
+                while True:
+                    block = os.read(output_fd, 1024 * 1024)
+                    if not block:
+                        break
+                    output_value.update(block)
+                    output_bytes += len(block)
+                output_identity = os.fstat(output_fd)
+                if any(getattr(output_before_read, field) != getattr(output_identity, field)
+                       for field in stable_file_fields):
+                    raise ValueError(f"release asset changed while reading it back: {name}")
+                if (output_bytes != byte_count or output_value.hexdigest() != input_digest):
+                    raise ValueError(f"release asset read-back hash differs after copying: {name}")
+                copied[name] = {
+                    "name": name,
+                    "bytes": byte_count,
+                    "sha256": input_digest,
+                    "identity": tuple(
+                        getattr(output_identity, field) for field in stable_file_fields
+                    ),
+                }
+            finally:
+                os.close(input_fd)
+                if output_fd >= 0:
+                    os.close(output_fd)
+
+        os.fsync(bundle_fd)
+        bundle_stable = os.fstat(bundle_fd)
+        with os.scandir(bundle_fd) as iterator:
+            final_names = sorted((entry.name for entry in iterator), key=os.fsencode)
+        if final_names != sorted(names, key=os.fsencode):
+            raise ValueError("copied release closure differs from the exact four assets")
+        stable_file_fields = (
+            "st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns",
+        )
+        for name in names:
+            final_identity = os.stat(name, dir_fd=bundle_fd, follow_symlinks=False)
+            if (not stat.S_ISREG(final_identity.st_mode) or
+                    tuple(getattr(final_identity, field) for field in stable_file_fields) !=
+                    copied[name]["identity"]):
+                raise ValueError(f"release asset changed after copying: {name}")
+        bundle_after = os.fstat(bundle_fd)
+        bundle_entry_after = os.stat(bundle.name, dir_fd=parent_fd, follow_symlinks=False)
+        parent_after = os.fstat(parent_fd)
+        stable_directory_fields = (
+            "st_dev", "st_ino", "st_mode", "st_mtime_ns", "st_ctime_ns",
+        )
+        if any(getattr(bundle_stable, field) != getattr(bundle_after, field)
+               for field in stable_directory_fields):
+            raise ValueError("release bundle directory changed during final verification")
+        if (bundle_entry_after.st_dev != opened_bundle.st_dev or
+                bundle_entry_after.st_ino != opened_bundle.st_ino or
+                any(getattr(parent_stable, field) != getattr(parent_after, field)
+                    for field in stable_directory_fields)):
+            raise ValueError("release bundle path changed while assets were written")
+        return [
+            {key: copied[name][key] for key in ("name", "bytes", "sha256")}
+            for name in names
+        ]
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        if bundle_fd >= 0:
+            os.close(bundle_fd)
+        os.close(parent_fd)
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -317,7 +565,7 @@ def require_pass_report(path: Path) -> dict[str, Any]:
     spec = REPORT_SPECS.get(path.name)
     if spec is None:
         raise ValueError(f"no locked report schema exists for {path.name}")
-    if report.get("schema") != 1:
+    if type(report.get("schema")) is not int or report["schema"] != 1:
         raise ValueError(f"{path.name} schema is not exactly 1")
     if report.get("classification") != spec["classification"]:
         raise ValueError(f"{path.name} classification differs from the lock")
@@ -402,6 +650,7 @@ def main() -> int:
         return 1
     source = args.build_output.resolve()
     bundle = args.bundle.resolve()
+    snapshot_owner = None
 
     try:
         if not source.is_dir():
@@ -417,6 +666,7 @@ def main() -> int:
         missing = sorted(name for name in required if not is_regular_file(source / name))
         if missing:
             raise ValueError(f"required build outputs are missing: {missing}")
+        snapshot_owner, source, snapshot_identities = snapshot_build_outputs(source, required)
 
         reject_private_markers(source)
 
@@ -493,16 +743,41 @@ def main() -> int:
         if not isinstance(tooling_hashes, dict) or set(tooling_hashes) != set(TOOLING_FILES):
             raise ValueError("provenance tooling map is incomplete")
         stage_root = Path(__file__).resolve().parents[1]
+        actual_tooling_hashes: dict[str, str] = {}
         for name in TOOLING_FILES:
             path = stage_root / name
-            if not is_regular_file(path) or tooling_hashes[name] != sha256(path):
+            if not is_regular_file(path):
+                raise ValueError(f"current committed tooling is missing or unsafe: {name}")
+            actual_tooling_hashes[name] = sha256(path)
+            if tooling_hashes[name] != actual_tooling_hashes[name]:
                 raise ValueError(f"current committed tooling differs from provenance: {name}")
+
+        current_source_lock_sha256 = actual_tooling_hashes["source-lock.json"]
+        output_source_lock_sha256 = sha256(source / "source-lock.json")
+        if current_source_lock_sha256 != output_source_lock_sha256:
+            raise ValueError("output source lock differs from the current committed source lock")
+        for name in ("source-pristine-gates.json", "source-patched-gates.json"):
+            if reports[name].get("source_lock_sha256") != output_source_lock_sha256:
+                raise ValueError(f"{name} is not bound to the exact output source lock")
 
         builder = provenance.get("builder", {})
         if builder.get("base_digest") != LOCKED_BASE_DIGEST:
             raise ValueError("provenance builder base digest is not locked")
         source_lock = load_json(source / "source-lock.json")
         builder_lock = source_lock.get("builder", {})
+        locked_download_closure = load_download_lock(source / "source-lock.json")
+        download_manifest, download_manifest_bytes = load_manifest_with_bytes(
+            source / "download-closure.json"
+        )
+        download_manifest_sha256 = hashlib.sha256(download_manifest_bytes).hexdigest()
+        actual_download_closure = {
+            "schema": download_manifest["schema"],
+            "directories": len(download_manifest["directories"]),
+            "files": len(download_manifest["files"]),
+            "manifest_sha256": download_manifest_sha256,
+        }
+        if actual_download_closure != locked_download_closure:
+            raise ValueError("download manifest identity differs from the exact source lock")
         if (builder.get("source_date_epoch") != builder_lock.get("source_date_epoch") or
                 builder.get("apt_snapshot") != builder_lock.get("apt_snapshot") or
                 builder.get("apt_snapshot_uri") != builder_lock.get("apt_snapshot_uri") or
@@ -542,6 +817,26 @@ def main() -> int:
                 provenance.get("image_identity") != expected_image_identity):
             raise ValueError("provenance source/image identity differs from source lock")
         abi_lock = source_lock.get("live_abi_baseline", {})
+        builder_vanilla_lock = source_lock.get("canonical_builder_vanilla", {})
+        if (not isinstance(builder_vanilla_lock, dict) or
+                set(builder_vanilla_lock) != {"module_bytes", "module_sha256"} or
+                type(builder_vanilla_lock.get("module_bytes")) is not int or
+                builder_vanilla_lock["module_bytes"] <= 0 or
+                re.fullmatch(
+                    r"[0-9a-f]{64}", str(builder_vanilla_lock.get("module_sha256", ""))
+                ) is None):
+            raise ValueError("canonical builder vanilla lock schema/identity is invalid")
+        expected_vanilla_module = {
+            "bytes": builder_vanilla_lock.get("module_bytes"),
+            "sha256": builder_vanilla_lock.get("module_sha256"),
+        }
+        vanilla_path = source / "mt7915e.vanilla.ko"
+        vanilla_gate_artifact = gate.get("artifacts", {}).get(
+            "mt7915e_vanilla_module", {}
+        )
+        vanilla_report_artifact = reports["vanilla-abi-gates.json"].get(
+            "artifacts", {}
+        ).get("mt7915e_vanilla_module", {})
         if (provenance.get("kernel_build_identity") != "builder@buildhost" or
                 provenance.get("kernel_package_format") != abi_lock.get("package_format") or
                 provenance.get("kernel_dependency") != abi_lock.get("kernel_dependency") or
@@ -552,6 +847,18 @@ def main() -> int:
                 provenance.get("vanilla_undefined_symbols_sha256") !=
                 abi_lock.get("undefined_symbols_sha256")):
             raise ValueError("provenance kernel/module ABI identity differs from source lock")
+        if (not is_regular_file(vanilla_path) or
+                expected_vanilla_module["bytes"] != vanilla_path.stat().st_size or
+                expected_vanilla_module["sha256"] != sha256(vanilla_path) or
+                provenance.get("vanilla_module") != expected_vanilla_module or
+                vanilla_gate_artifact.get("bytes") != expected_vanilla_module["bytes"] or
+                vanilla_gate_artifact.get("sha256") != expected_vanilla_module["sha256"] or
+                vanilla_report_artifact.get("bytes") != expected_vanilla_module["bytes"] or
+                vanilla_report_artifact.get("sha256") != expected_vanilla_module["sha256"]):
+            raise ValueError(
+                "canonical builder vanilla module differs from source lock, provenance, "
+                "vanilla report, or final gate"
+            )
         if (provenance.get("capture_default_enabled") is not False or
                 provenance.get("wireless_config_preseeded") is not False or
                 provenance.get("preserved_wireless_config_mutated") is not False or
@@ -572,7 +879,7 @@ def main() -> int:
                 raise ValueError(f"provenance artifact hash differs for {name}")
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", str(builder.get("image_id", ""))):
             raise ValueError("provenance builder image ID is invalid")
-        if builder.get("jobs") not in range(1, 7):
+        if type(builder.get("jobs")) is not int or builder["jobs"] not in range(1, 7):
             raise ValueError("provenance build parallelism is outside 1..6")
         if builder.get("package_versions_sha256") != sha256(source / "builder-packages.txt"):
             raise ValueError("builder package-version manifest is not cross-bound")
@@ -585,8 +892,26 @@ def main() -> int:
             source / "network-prepare-receipt.json"
         ):
             raise ValueError("networked prepare receipt is not cross-bound")
-        if builder.get("download_manifest_sha256") != sha256(source / "download-closure.json"):
+        if builder.get("download_manifest_sha256") != download_manifest_sha256:
             raise ValueError("download manifest is not cross-bound")
+        prepare_receipt = load_json(source / "network-prepare-receipt.json")
+        if type(prepare_receipt.get("schema")) is not int:
+            raise ValueError("networked prepare receipt schema is not an integer")
+        expected_prepare_receipt = {
+            "schema": 1,
+            "phase": "networked-prepare-complete",
+            "stage4_source_commit": provenance.get("stage4_source_commit"),
+            "stage4_source_tree": provenance.get("stage4_source_tree"),
+            "stage4_source_archive_sha256": provenance.get("stage4_source_archive_sha256"),
+            "builder_image_id": builder.get("image_id"),
+            "builder_base_digest": builder.get("base_digest"),
+            "openwrt_commit": provenance.get("openwrt_commit"),
+            "kwrt_commit": provenance.get("kwrt_layout_commit"),
+            "final_config_sha256": sha256(source / "build.config"),
+            "download_manifest_sha256": download_manifest_sha256,
+        }
+        if prepare_receipt != expected_prepare_receipt:
+            raise ValueError("networked prepare receipt identity differs from locked provenance")
 
         signature = gate_artifacts.get("signature", {})
         if provenance.get("signature") != signature:
@@ -609,32 +934,25 @@ def main() -> int:
             if sha256(source / name) != expected:
                 raise ValueError(f"AUDIT-SHA256SUMS mismatch for {name}")
 
-        bundle.mkdir(parents=True, exist_ok=True)
-        for name in RELEASE_ASSETS:
-            shutil.copy2(source / name, bundle / name)
-        copied_names = {path.name for path in bundle.iterdir()}
-        if copied_names != set(RELEASE_ASSETS) or any(
-            not is_regular_file(bundle / name) for name in RELEASE_ASSETS
-        ):
-            raise ValueError("copied release closure differs from the exact four regular assets")
-        copied_sums = parse_sums(bundle / "SHA256SUMS", HASHED_ASSETS)
-        for name, expected in copied_sums.items():
-            if sha256(bundle / name) != expected:
-                raise ValueError(f"copied release closure hash mismatch for {name}")
+        copied_assets = write_release_bundle(
+            source,
+            bundle,
+            RELEASE_ASSETS,
+            {name: snapshot_identities[name] for name in RELEASE_ASSETS},
+        )
         print(json.dumps({
             "classification": "EXPERIMENTAL-DO-NOT-FLASH",
             "result": "pass",
             "flash_authorized": False,
-            "assets": [
-                {"name": name, "bytes": (bundle / name).stat().st_size,
-                 "sha256": sha256(bundle / name)}
-                for name in RELEASE_ASSETS
-            ],
+            "assets": copied_assets,
         }, indent=2, sort_keys=True))
         return 0
     except (OSError, ValueError) as exc:
         print(f"release bundle rejected: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if snapshot_owner is not None:
+            snapshot_owner.cleanup()
 
 
 if __name__ == "__main__":

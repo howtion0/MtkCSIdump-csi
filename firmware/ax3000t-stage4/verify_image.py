@@ -61,8 +61,12 @@ EXPECTED_BASELINE_UNDEFINED_COUNT = 294
 EXPECTED_BASELINE_UNDEFINED_SHA256 = (
     "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb"
 )
-EXPECTED_BASELINE_MODULE_BYTES = 218088
-EXPECTED_BASELINE_MODULE_SHA256 = (
+EXPECTED_BUILDER_VANILLA_MODULE_BYTES = 217976
+EXPECTED_BUILDER_VANILLA_MODULE_SHA256 = (
+    "e9eb76d14a51257e6d50aa8c50a1b6c97351e3395595ed243bc0c7d2033e9309"
+)
+EXPECTED_LIVE_BASELINE_MODULE_BYTES = 218088
+EXPECTED_LIVE_BASELINE_MODULE_SHA256 = (
     "346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621"
 )
 EXPECTED_PATCHED_UNDEFINED_COUNT = 297
@@ -1282,11 +1286,23 @@ def verify_module(path: Path, report: Report, baseline: bool = False) -> dict[st
     )
     if baseline:
         report.require(
-            len(data) == EXPECTED_BASELINE_MODULE_BYTES and
-            sha256_bytes(data) == EXPECTED_BASELINE_MODULE_SHA256,
-            "module.baseline.byte_identity",
-            "vanilla module is byte-identical to the public/live Kwrt baseline",
-            {"bytes": len(data), "sha256": sha256_bytes(data)},
+            len(data) == EXPECTED_BUILDER_VANILLA_MODULE_BYTES and
+            sha256_bytes(data) == EXPECTED_BUILDER_VANILLA_MODULE_SHA256,
+            "module.vanilla.canonical_builder_fingerprint",
+            "vanilla module matches the canonical Stage4 builder fingerprint; the "
+            "public/live module differs only by the locked __FILE__ path string",
+            {
+                "actual": {"bytes": len(data), "sha256": sha256_bytes(data)},
+                "canonical_builder": {
+                    "bytes": EXPECTED_BUILDER_VANILLA_MODULE_BYTES,
+                    "sha256": EXPECTED_BUILDER_VANILLA_MODULE_SHA256,
+                },
+                "public_live_reference": {
+                    "bytes": EXPECTED_LIVE_BASELINE_MODULE_BYTES,
+                    "sha256": EXPECTED_LIVE_BASELINE_MODULE_SHA256,
+                },
+                "equivalence": "single __FILE__ path string in .rodata.str1.8",
+            },
         )
         report.require(
             elf["undefined_symbols_count"] == EXPECTED_BASELINE_UNDEFINED_COUNT and

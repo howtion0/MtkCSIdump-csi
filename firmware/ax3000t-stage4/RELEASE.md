@@ -10,8 +10,22 @@
 - [ ] Two independent fresh-volume builds passed `reproducibility-gates.json`;
       the final signed images and every locked comparison artifact are
       byte-identical.
-- [ ] The networked prepare receipts/download manifests pass, and compilation
-      occurred only in the recorded `--network=none` phase.
+- [ ] The networked prepare serially ran the 13 locked extra download targets,
+      rejected short files and created the canonical schema-1 closure with
+      exactly one directory, 132 files and manifest SHA-256
+      `fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c`.
+      It immediately verified the new manifest against the lock before creating
+      the network receipt. The `--network=none` phase verified it again before
+      and after top-level `make prepare`, for three locked verifications total.
+- [ ] The network receipt, `build-provenance.json` and Release bundler all
+      cross-bind that exact closure schema/count/hash identity.
+- [ ] Before vanilla mt76, the offline phase compiled
+      `package/utils/lua/compile` with `-j1`, rejected every zero-byte `*.o`, and
+      required a non-empty `liblua.so.5.1.5`. After the final image build, it
+      repeated that artifact check before collecting outputs.
+- [ ] The complete vanilla `package/kernel/mt76/compile` ABI-control target ran
+      with `-j1`. This direct goal expands selected network-package dependencies;
+      parallel runs were observed to race in Lua, netifd and hostapd.
 - [ ] `source-pristine-gates.json` is `pass` with no warning/failure.
 - [ ] `source-patched-gates.json` is `pass` with no warning/failure.
 - [ ] `capture-source-gates.json` reconstructs the exact locked Git tree and
@@ -20,7 +34,13 @@
       modes and one compression thread are bound into provenance; codeload
       gzip bytes are not trusted as stable inputs.
 - [ ] `vanilla-abi-gates.json` proves IPK, exact kernel dependency,
-      `this_module=0x440`, 294 undefined symbols and the locked hash.
+      `this_module=0x440`, 294 undefined symbols and the locked hash. It also
+      proves the canonical Stage4 vanilla module is exactly 217,976 bytes with
+      SHA-256
+      `e9eb76d14a51257e6d50aa8c50a1b6c97351e3395595ed243bc0c7d2033e9309`;
+      the distinct 218,088-byte public/live hash remains an ABI reference, not a
+      false byte-identity claim. Provenance, the vanilla report and final gate
+      all cross-bind the canonical builder module identity.
 - [ ] `gate-report.json` is `pass` with every gate `pass`, including DTB,
       selected FIT payload hashes, exact nine-partition geometry, UBI capacity,
       metadata, generic upgrade path, final-root `platform.sh`/module identity,

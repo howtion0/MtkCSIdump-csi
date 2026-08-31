@@ -36,11 +36,16 @@ STAGE4_SIGNING_KEY_FILE=/private/path/ax3000t-stage4 \
 `run_repro_pair.sh` invokes the container wrapper twice with two fresh uniquely
 named volumes. For each clean build, phase 1 alone has networking: it fetches
 the locked commits, applies the locked public patches, runs source gates and
-downloads every hash-checked source. It writes a download closure receipt.
-Phase 2 receives the same volume with `--network=none`, revalidates that closure,
-then compiles, signs and verifies. The private key is mounted read-only only in
-phase 2 and copied only to a 1 MiB tmpfs; it never enters the retained work
-volume, output, log or provenance.
+downloads every hash-checked source. It creates a canonical schema-1 download
+closure containing exactly one directory and 132 files, whose manifest SHA-256
+is `fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c`,
+and immediately verifies it against `source-lock.json` before writing the
+network receipt. Phase 2 receives the same volume with `--network=none` and
+verifies the locked closure both before and after top-level `make prepare`—three
+locked verifications in total—then compiles, signs and verifies. The receipt,
+provenance and Release bundler cross-bind that exact closure identity. The
+private key is mounted read-only only in phase 2 and copied only to a 1 MiB
+tmpfs; it never enters the retained work volume, output, log or provenance.
 
 The volumes are required because the normal macOS host filesystem is
 case-insensitive and OpenWrt correctly refuses to build there. The wrappers
@@ -131,16 +136,44 @@ misleading list of unavailable per-feed repositories.
    non-root `umask 022` and OpenWrt's later host-zstd shadowing from changing
    the bytes. The full 109-member/tree gate runs before and after OpenWrt's
    downloader; only the 14,026,970-byte, SHA-256 `6f02ffbe…` archive survives.
-   Then download the remaining sources with OpenWrt hash checking, freeze a
-   complete JSON closure of every directory/file name, byte size and SHA-256,
-   and end the networked container. GitHub codeload gzip bytes are never a
-   stable build input.
-6. Start a new `--network=none` container, revalidate the download closure and
-   pinned signing identity, then build vanilla mt76 before adding CSI.
+   Then download the remaining sources with OpenWrt hash checking. OpenWrt's
+   aggregate downloader omits a host tool that is reachable only through a
+   compile edge (`erofs-utils -> lz4`) and several package/host sources reached
+   by the selected image graph, so 13 exact `/download` targets are also run
+   serially with `-j1`. Reject short files and create the canonical JSON
+   closure: schema 1, exactly one directory and 132 files, with manifest
+   SHA-256
+   `fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c`.
+   Immediately verify that newly created manifest against `source-lock.json`,
+   then bind its identity into the network receipt and end the networked
+   container. GitHub codeload gzip bytes are never a stable build input.
+6. Start a new `--network=none` container and verify the locked download closure
+   a second time, before any prepare or compilation work.
+   Run top-level `make prepare` so the locked OpenWrt tools, toolchain and target
+   kernel graph—not host-installed substitutes—exist before direct package
+   goals. Verify the unchanged closure a third time, compile `usign` and `ucert`
+   as separate goals, and verify the pinned signing identity. Before vanilla
+   mt76, compile `package/utils/lua/compile` serially with `-j1`; reject every
+   zero-byte `*.o` and require a non-empty `liblua.so.5.1.5`. Run the entire
+   vanilla `package/kernel/mt76/compile` ABI-control goal with `-j1`, not merely
+   its mt76 source compilation: the direct goal expands selected network-package
+   dependencies, and parallel execution was observed to race in Lua, netifd and
+   hostapd. After the final image build, run the Lua artifact check again before
+   collecting outputs, rejecting any zero-byte `*.o` and requiring the same
+   non-empty `liblua.so.5.1.5`. The network receipt, provenance and Release
+   bundler all cross-bind the schema/count/hash identity above. Only after the
+   vanilla ABI control passes is the CSI patch added.
 7. Require vanilla IPK, `kernel (=6.12.94~1-r1)`, `this_module=0x440`, and
-   byte identity with the public/live 218,088-byte module (SHA-256
-   `346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621`).
-   Its 294-symbol hash remains
+   exact identity with the canonical Stage4 builder module: 217,976 bytes,
+   SHA-256
+   `e9eb76d14a51257e6d50aa8c50a1b6c97351e3395595ed243bc0c7d2033e9309`.
+   Keep the public/live 218,088-byte module separately locked at SHA-256
+   `346ab2d4ddcd26322c6f00f85f1c2567a722d9bc605d7ee2e0084af3a64b9621`.
+   Exhaustive ELF comparison attributes the 112-byte size delta solely to one
+   `ASSERT_RTNL()` `__FILE__` path string in `.rodata.str1.8`: all other
+   strings, runtime sections, ABI fields and undefined symbols match; affected
+   relocation addends shift only with that string's aligned offset. The
+   294-symbol hash remains
    `a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb`.
 8. Only then install the hardened CSI patch, clean mt76 and build the image.
 9. Require the FIT-selected kernel and DTB each to carry a verified hash, the

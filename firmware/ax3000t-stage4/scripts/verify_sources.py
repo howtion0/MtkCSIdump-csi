@@ -18,6 +18,47 @@ PLATFORM_REL = Path("target/linux/mediatek/filogic/base-files/lib/upgrade/platfo
 MT76_MAKEFILE = Path("package/kernel/mt76/Makefile")
 KERNEL_DEFAULTS = Path("include/kernel-defaults.mk")
 PROFILE_REL = Path("target/linux/mediatek/image/filogic.mk")
+TOOLS_MAKEFILE = Path("tools/Makefile")
+TOOLS_LZ4_MAKEFILE = Path("tools/lz4/Makefile")
+PREPARE_DOWNLOAD_TARGETS = (
+    "tools/lz4/download",
+    "package/kernel/bpf-headers/download",
+    "package/libs/argp-standalone/download",
+    "package/libs/libmd/download",
+    "package/libs/libpcap/download",
+    "package/libs/libselinux/download",
+    "package/libs/libsepol/download",
+    "package/libs/ncurses/download",
+    "package/libs/pcre2/download",
+    "package/network/utils/resolveip/download",
+    "package/system/ucert/download",
+    "package/utils/lua/download",
+    "package/utils/util-linux/download",
+)
+EXPECTED_DOWNLOAD_CLOSURE = {
+    "schema": 1,
+    "directories": 1,
+    "files": 132,
+    "manifest_sha256": "fd5f9a233c2313a5e4f5f7391aeb7be5f35b67537b657c30d861c4adb26c345c",
+}
+EXPECTED_SERIAL_PACKAGE_PREREQUISITES = [
+    {
+        "target": "package/utils/lua/compile",
+        "jobs": 1,
+        "reason": (
+            "Lua 5.1 package compilation can leave zero-byte objects under "
+            "inherited parallelism"
+        ),
+    },
+]
+EXPECTED_VANILLA_MT76_COMPILE = {
+    "target": "package/kernel/mt76/compile",
+    "jobs": 1,
+    "reason": (
+        "The direct ABI-control goal expands selected network dependencies that race under "
+        "parallel package compilation"
+    ),
+}
 
 
 def sha256(path: Path) -> str:
@@ -404,6 +445,259 @@ def main() -> int:
            "preseed_before_download": preseed_before_download,
            "full_verifications": build_script.count(
                'python3 "$STAGE_DIR/scripts/verify_capture_archive.py"')})
+
+    prepare_array_matches = re.findall(
+        r'(?ms)^PREPARE_DOWNLOAD_TARGETS=\(\n(.*?)^\)\n', build_script)
+    expected_prepare_array_lines = [f'  "{target}"' for target in PREPARE_DOWNLOAD_TARGETS]
+    actual_prepare_array_lines = (
+        prepare_array_matches[0].splitlines() if len(prepare_array_matches) == 1 else []
+    )
+    prepare_download_loop = (
+        'for prepare_download_target in "${PREPARE_DOWNLOAD_TARGETS[@]}"; do\n'
+        "  printf '[networked-prepare] exact download target: %s\\n' \\\n"
+        '    "$prepare_download_target" | tee -a "$LOG"\n'
+        '  "${MAKE[@]}" -j1 "$prepare_download_target" 2>&1 | tee -a "$LOG"\n'
+        "done"
+    )
+    general_download_marker = '"${MAKE[@]}" -j"$JOBS" download 2>&1 | tee -a "$LOG"'
+    short_file_marker = 'if find "$OPENWRT/dl" -type f -size -1024c -print -quit'
+    closure_create_marker = (
+        'python3 "$STAGE_DIR/scripts/download_closure.py" create \\\n'
+    )
+    prepare_download_order = (
+        build_script.count(general_download_marker) == 1 and
+        build_script.count(prepare_download_loop) == 1 and
+        build_script.count(short_file_marker) == 1 and
+        build_script.count(closure_create_marker) == 1 and
+        build_script.index(general_download_marker) <
+        build_script.index(prepare_download_loop) <
+        build_script.index(short_file_marker) <
+        build_script.index(closure_create_marker)
+    )
+    locked_prepare_targets = builder.get("prepare_download_targets")
+    check(gates, "builder.download_closure.prepare_targets",
+          locked_prepare_targets == list(PREPARE_DOWNLOAD_TARGETS) and
+          actual_prepare_array_lines == expected_prepare_array_lines and
+          prepare_download_order,
+          {"targets": list(PREPARE_DOWNLOAD_TARGETS), "execution": "serial -j1",
+           "order": "general download -> exact targets -> short-file gate -> closure"},
+          {"locked_targets": locked_prepare_targets,
+           "script_targets": [line.strip().strip('"') for line in
+                              actual_prepare_array_lines],
+           "array_definitions": len(prepare_array_matches),
+           "serial_loop_count": build_script.count(prepare_download_loop),
+           "order_valid": prepare_download_order})
+
+    expected_dependency_closure = {
+        "method": "normalized-gnu-make-database",
+        "tools_compile_direct_count": 53,
+        "tools_compile_transitive_only": ["tools/lz4/compile"],
+        "required_tool_download_targets": ["tools/lz4/download"],
+        "host_download_aliases_rejected": [
+            "package/libs/ncurses/host/download",
+            "package/system/ucert/host/download",
+        ],
+        "canonical_host_source_targets": [
+            "package/libs/ncurses/download",
+            "package/system/ucert/download",
+        ],
+    }
+    dependency_closure = builder.get("prepare_dependency_closure")
+    tools_make_text = read_text(args.openwrt / TOOLS_MAKEFILE)
+    tools_lz4_text = read_text(args.openwrt / TOOLS_LZ4_MAKEFILE)
+    tools_dependency_witnesses = (
+        "$(curdir)/builddirs-default := $(tools-y)",
+        "$(curdir)/erofs-utils/compile := $(curdir)/libtool/compile "
+        "$(curdir)/xz/compile $(curdir)/lz4/compile $(curdir)/util-linux/compile",
+    )
+    lz4_source_witnesses = (
+        "PKG_VERSION:=1.10.0",
+        "PKG_SOURCE_VERSION:=ebb370ca83af193212df4dcbadcc5d87bc0de2f0",
+        "PKG_MIRROR_HASH:=b168683fbeee4182f6f64bc216ad23f3b94edefbca9b8792dcd99ecd0a49f20f",
+    )
+    rejected_host_aliases = expected_dependency_closure["host_download_aliases_rejected"]
+    configuration_witnesses = (
+        "grep -qx '# CONFIG_BUILD_ALL_HOST_TOOLS is not set' \"$OPENWRT/.config\"",
+        "grep -qx '# CONFIG_TARGET_INITRAMFS_COMPRESSION_LZ4 is not set' "
+        '"$OPENWRT/.config"',
+    )
+    dependency_closure_valid = (
+        dependency_closure == expected_dependency_closure and
+        all(token in tools_make_text for token in tools_dependency_witnesses) and
+        all(token in tools_lz4_text for token in lz4_source_witnesses) and
+        build_script.count("tools/lz4/download") == 1 and
+        not any(alias in build_script for alias in rejected_host_aliases) and
+        "CHECK_ALL" not in build_script and
+        all(token in build_script for token in configuration_witnesses)
+    )
+    check(gates, "builder.prepare_dependency_closure",
+          dependency_closure_valid,
+          expected_dependency_closure,
+          {"lock": dependency_closure,
+           "tools_make_witnesses": all(
+               token in tools_make_text for token in tools_dependency_witnesses),
+           "lz4_source_witnesses": all(
+               token in tools_lz4_text for token in lz4_source_witnesses),
+           "lz4_download_occurrences": build_script.count("tools/lz4/download"),
+           "rejected_host_alias_present": any(
+               alias in build_script for alias in rejected_host_aliases),
+           "check_all_present": "CHECK_ALL" in build_script,
+           "disabled_config_witnesses": all(
+               token in build_script for token in configuration_witnesses)})
+
+    closure_verify_marker = (
+        'python3 "$STAGE_DIR/scripts/download_closure.py" verify \\\n'
+    )
+    closure_verify_block = (
+        'python3 "$STAGE_DIR/scripts/download_closure.py" verify \\\n'
+        '  --root "$OPENWRT/dl" --manifest "$WORK_DIR/download-closure.json" \\\n'
+        '  --lock "$STAGE_DIR/source-lock.json" | tee -a "$LOG"'
+    )
+    receipt_create_marker = 'python3 - "$WORK_DIR/.stage4-prepared.json"'
+    receipt_validate_marker = 'python3 - "$PREPARED_MARKER"'
+    receipt_create_count = build_script.count(receipt_create_marker)
+    receipt_validate_count = build_script.count(receipt_validate_marker)
+    receipt_create_position = (
+        build_script.index(receipt_create_marker) if receipt_create_count == 1 else -1
+    )
+    receipt_validate_position = (
+        build_script.index(receipt_validate_marker) if receipt_validate_count == 1 else -1
+    )
+    locked_download_closure = builder.get("download_closure")
+    receipt_lock_witnesses = (
+        'locked_download_manifest_sha256 = json.loads(',
+        ')["builder"]["download_closure"]["manifest_sha256"]',
+        'if download_manifest_sha256 != locked_download_manifest_sha256:',
+        'raise SystemExit("download manifest differs from the locked closure before '
+        'receipt creation")',
+    )
+    offline_prepare_marker = '"${MAKE[@]}" -j"$JOBS" prepare 2>&1 | tee -a "$LOG"'
+    usign_compile_marker = (
+        '"${MAKE[@]}" -j"$JOBS" package/system/usign/host/compile '
+        '2>&1 | tee -a "$LOG"'
+    )
+    ucert_compile_marker = (
+        '"${MAKE[@]}" -j"$JOBS" package/system/ucert/host/compile '
+        '2>&1 | tee -a "$LOG"'
+    )
+    lua_compile_marker = (
+        '"${MAKE[@]}" -j1 package/utils/lua/compile 2>&1 | tee -a "$LOG"'
+    )
+    mt76_compile_marker = (
+        '"${MAKE[@]}" -j1 package/kernel/mt76/compile 2>&1 | tee -a "$LOG"'
+    )
+    vanilla_verify_marker = 'python3 "$STAGE_DIR/scripts/verify_vanilla_abi.py" \\\n'
+    csi_patch_marker = 'cp "$STAGE_DIR/patches/999-mt7915-csi-v2-hardened.patch" \\\n'
+    closure_verify_positions = [
+        match.start() for match in re.finditer(re.escape(closure_verify_marker), build_script)
+    ]
+    closure_identity_valid = (
+        locked_download_closure == EXPECTED_DOWNLOAD_CLOSURE and
+        build_script.count(closure_verify_block) == 3 and
+        len(closure_verify_positions) == 3 and
+        receipt_create_count == 1 and receipt_validate_count == 1 and
+        all(token in build_script for token in receipt_lock_witnesses) and
+        build_script.index(closure_create_marker) < closure_verify_positions[0] <
+        receipt_create_position
+    )
+    check(gates, "builder.download_closure.identity",
+          closure_identity_valid,
+          {**EXPECTED_DOWNLOAD_CLOSURE, "locked_verifications": 3,
+           "receipt_cross_binding": True},
+          {"lock": locked_download_closure,
+           "locked_verify_blocks": build_script.count(closure_verify_block),
+           "verify_markers": len(closure_verify_positions),
+           "receipt_create_markers": receipt_create_count,
+           "receipt_validate_markers": receipt_validate_count,
+           "receipt_lock_witnesses": all(
+               token in build_script for token in receipt_lock_witnesses),
+           "networked_order_valid": (
+               len(closure_verify_positions) == 3 and receipt_create_count == 1 and
+               build_script.index(closure_create_marker) < closure_verify_positions[0] <
+               receipt_create_position
+           )})
+
+    lua_validation_witnesses = (
+        "verify_lua_serial_artifacts() {",
+        "mapfile -t LUA_SOURCE_DIRS < <(find \"$OPENWRT/build_dir\" -type d",
+        "[[ ${#LUA_SOURCE_DIRS[@]} -eq 1 ]] || {",
+        "-path '*/lua-5.1.5/src' | sort)",
+        "-name '*.o' -size 0",
+        "Lua serial prerequisite left a zero-byte object",
+        '[[ -s "${LUA_SOURCE_DIRS[0]}/liblua.so.5.1.5" ]] || {',
+    )
+    lua_pre_mt76_marker = 'verify_lua_serial_artifacts "before vanilla mt76"'
+    lua_post_image_marker = 'verify_lua_serial_artifacts "after final image build"'
+    final_image_build_marker = 'if ! "${MAKE[@]}" -j"$JOBS" 2>&1 | tee -a "$LOG"; then'
+    target_output_marker = 'TARGET_OUT="$OPENWRT/bin/targets/mediatek/filogic"'
+    lua_validation_order = (
+        build_script.count(lua_pre_mt76_marker) == 1 and
+        build_script.count(lua_post_image_marker) == 1 and
+        build_script.count(final_image_build_marker) == 1 and
+        build_script.count(target_output_marker) == 1 and
+        build_script.index(lua_compile_marker) < build_script.index(lua_pre_mt76_marker) <
+        build_script.index(mt76_compile_marker) < build_script.index(final_image_build_marker) <
+        build_script.index(lua_post_image_marker) < build_script.index(target_output_marker)
+    )
+    lua_serial_valid = (
+        builder.get("serial_package_prerequisites") ==
+        EXPECTED_SERIAL_PACKAGE_PREREQUISITES and
+        build_script.count(lua_compile_marker) == 1 and
+        all(build_script.count(token) == 1 for token in lua_validation_witnesses) and
+        lua_validation_order
+    )
+    check(gates, "builder.package_parallelism.lua",
+          lua_serial_valid,
+          {"prerequisites": EXPECTED_SERIAL_PACKAGE_PREREQUISITES,
+           "unique_source_directory": True, "reject_zero_byte_objects": True,
+           "nonempty_liblua": "liblua.so.5.1.5", "post_image_recheck": True},
+          {"prerequisites": builder.get("serial_package_prerequisites"),
+           "serial_compile_count": build_script.count(lua_compile_marker),
+           "validation_witnesses": all(
+               build_script.count(token) == 1 for token in lua_validation_witnesses),
+           "validation_order": lua_validation_order})
+
+    check(gates, "builder.package_parallelism.vanilla_mt76",
+          builder.get("vanilla_mt76_compile") == EXPECTED_VANILLA_MT76_COMPILE and
+          build_script.count(mt76_compile_marker) == 1 and
+          '-j"$JOBS" package/kernel/mt76/compile' not in build_script,
+          EXPECTED_VANILLA_MT76_COMPILE,
+          {"lock": builder.get("vanilla_mt76_compile"),
+           "serial_compile_count": build_script.count(mt76_compile_marker),
+           "parallel_compile_present": (
+               '-j"$JOBS" package/kernel/mt76/compile' in build_script)})
+
+    unique_offline_markers = (
+        offline_prepare_marker, usign_compile_marker, ucert_compile_marker,
+        lua_compile_marker, lua_pre_mt76_marker, mt76_compile_marker,
+        vanilla_verify_marker, csi_patch_marker,
+    )
+    offline_marker_counts = {
+        marker: build_script.count(marker) for marker in unique_offline_markers
+    }
+    offline_prepare_order = (
+        len(closure_verify_positions) == 3 and receipt_validate_count == 1 and
+        all(count == 1 for count in offline_marker_counts.values()) and
+        receipt_validate_position < closure_verify_positions[1] <
+        build_script.index(offline_prepare_marker) < closure_verify_positions[2] <
+        build_script.index(usign_compile_marker) < build_script.index(ucert_compile_marker) <
+        build_script.index(lua_compile_marker) < build_script.index(lua_pre_mt76_marker) <
+        build_script.index(mt76_compile_marker) <
+        build_script.index(vanilla_verify_marker) < build_script.index(csi_patch_marker)
+    )
+    check(gates, "builder.offline.prepare_order",
+          builder.get("offline_prepare_target") == "prepare" and
+          offline_prepare_order and
+          "tools/install" not in build_script and "toolchain/install" not in build_script,
+          {"target": "prepare", "download_closure_verifications": 3,
+           "order": ("network closure -> receipt; receipt validation -> closure -> prepare -> "
+                     "closure -> usign -> ucert -> Lua -j1 -> mt76 -j1 -> ABI -> CSI")},
+          {"locked_target": builder.get("offline_prepare_target"),
+           "download_closure_verifications": len(closure_verify_positions),
+           "unique_marker_counts": list(offline_marker_counts.values()),
+           "manual_tools_install": "tools/install" in build_script,
+           "manual_toolchain_install": "toolchain/install" in build_script,
+           "order_valid": offline_prepare_order})
 
     try:
         openwrt_head = git(args.openwrt, "rev-parse", "HEAD")

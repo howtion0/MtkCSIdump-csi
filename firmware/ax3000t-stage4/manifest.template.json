@@ -99,6 +99,10 @@
   "this_module_section_size": "0x440",
   "vanilla_undefined_symbols_count": 294,
   "vanilla_undefined_symbols_sha256": "a17a1bbec220f58147a40693cc8f1b1f8079b787f6eb7a9461eb9e4b352d10fb",
+  "vanilla_module": {
+    "bytes": null,
+    "sha256": null
+  },
   "source_lock_sha256": null,
   "kwrt_exact_config_sha256": null,
   "build_config_sha256": null,

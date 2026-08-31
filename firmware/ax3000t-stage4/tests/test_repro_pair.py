@@ -66,6 +66,18 @@ class ReproPairTest(unittest.TestCase):
         self.assertEqual(report["result"], "fail")
         self.assertFalse(provenance["publication_ready"])
 
+    def test_one_byte_vanilla_module_difference_blocks_finalization(self) -> None:
+        _, first, second = self.fixture()
+        name = "mt7915e.vanilla.ko"
+        payload = (second / name).read_bytes()
+        (second / name).write_bytes(payload[:-1] + bytes([payload[-1] ^ 1]))
+        result = self.run_gate(first, second)
+        self.assertNotEqual(result.returncode, 0)
+        report = json.loads((first / "reproducibility-gates.json").read_text())
+        self.assertEqual(report["result"], "fail")
+        failed = {gate["name"] for gate in report["gates"] if gate["status"] == "fail"}
+        self.assertIn("repro.byte_identity.mt7915e.vanilla.ko", failed)
+
 
 if __name__ == "__main__":
     unittest.main()
