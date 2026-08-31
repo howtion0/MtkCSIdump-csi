@@ -6,11 +6,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from verify_sources import git as git_output  # noqa: E402
 
 
 class BuilderSnapshotLockTest(unittest.TestCase):
@@ -20,6 +25,46 @@ class BuilderSnapshotLockTest(unittest.TestCase):
         self.dockerfile = (ROOT / "container/Dockerfile").read_text()
         self.runner = (ROOT / "scripts/run_container_build.sh").read_text()
         self.builder = (ROOT / "scripts/build_image.sh").read_text()
+
+    def test_git_helper_preserves_both_porcelain_status_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            tracked = repo / "tracked.txt"
+            untracked = repo / "untracked.txt"
+            tracked.write_text("original\n")
+            subprocess.run(["git", "-C", str(repo), "add", tracked.name], check=True)
+            subprocess.run([
+                "git", "-C", str(repo),
+                "-c", "user.name=Stage4 Test",
+                "-c", "user.email=stage4@example.invalid",
+                "commit", "-qm", "seed",
+            ], check=True)
+
+            tracked.write_text("worktree change\n")
+            untracked.write_text("untracked\n")
+            self.assertEqual(
+                git_output(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines(),
+                [" M tracked.txt", "?? untracked.txt"],
+            )
+
+            subprocess.run(["git", "-C", str(repo), "add", tracked.name], check=True)
+            self.assertEqual(
+                git_output(repo, "status", "--porcelain=v1", "--untracked-files=all").splitlines(),
+                ["M  tracked.txt", "?? untracked.txt"],
+            )
+
+            subprocess.run([
+                "git", "-C", str(repo),
+                "-c", "user.name=Stage4 Test",
+                "-c", "user.email=stage4@example.invalid",
+                "commit", "-qm", "staged change",
+            ], check=True)
+            untracked.unlink()
+            self.assertEqual(
+                git_output(repo, "status", "--porcelain=v1", "--untracked-files=all"),
+                "",
+            )
 
     def test_every_apt_source_is_the_exact_signed_snapshot(self) -> None:
         snapshot = self.lock["apt_snapshot"]

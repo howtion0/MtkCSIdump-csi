@@ -90,7 +90,12 @@ def git(repo: Path, *args: str) -> str:
     )
     if proc.returncode:
         raise RuntimeError(proc.stderr.strip() or f"git {' '.join(args)} failed")
-    return proc.stdout.strip()
+    # Git's porcelain status uses both columns from byte zero.  In particular,
+    # an unstaged worktree modification starts with a significant leading
+    # space (" M path").  Strip only line terminators so callers comparing
+    # porcelain output cannot accidentally turn it into the staged form
+    # ("M  path").
+    return proc.stdout.rstrip("\r\n")
 
 
 def check(report: list[dict[str, Any]], name: str, condition: bool,
